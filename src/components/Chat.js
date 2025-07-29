@@ -66,14 +66,14 @@ const Chat = () => {
 				}
 				const usersList = await response.json();
 
-				const chatsWithUsers = usersList
-					.filter((user) => user.id !== auth.currentUser.uid)
+				const chatsWithUsers = usersList?.data
+					?.filter((user) => user.id !== auth.currentUser.uid)
 					.map((user) => ({
 						id: user.id,
-						name: user.name,
+						name: user.first_name,
 						lastMessage: 'No messages yet',
-						unreadCount: 0,
 					}));
+				console.log(chatsWithUsers);
 
 				setUsers(chatsWithUsers);
 			} catch (error) {
