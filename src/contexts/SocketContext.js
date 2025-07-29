@@ -10,7 +10,7 @@ export function SocketProvider({ children }) {
 
 	useEffect(() => {
 		// Initialize socket connection
-		const newSocket = io('http://localhost:3000', {
+		const newSocket = io('http://localhost:3001', {
 			auth: {
 				token: auth.currentUser?.uid, // Send user ID for authentication
 			},

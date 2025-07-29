@@ -2,369 +2,663 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import {
-	Box,
-	Container,
-	Paper,
-	TextField,
-	Button,
-	Typography,
-	AppBar,
-	Toolbar,
-	IconButton,
-	Dialog,
-	DialogTitle,
-	DialogContent,
-	DialogActions,
-	CircularProgress,
-	Drawer,
-	List,
-	ListItem,
-	ListItemText,
-	ListItemAvatar,
-	Avatar,
-	Divider,
-	Badge,
+  Box,
+  Container,
+  Paper,
+  TextField,
+  Button,
+  Typography,
+  AppBar,
+  Toolbar,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
+  Drawer,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Avatar,
+  Divider,
+  Badge,
+  Tooltip,
+  Menu,
+  MenuItem,
+  InputAdornment,
+  Alert,
 } from '@mui/material';
 import {
-	Send as SendIcon,
-	ExitToApp as ExitToAppIcon,
-	Person as PersonIcon,
+  Send as SendIcon,
+  ExitToApp as ExitToAppIcon,
+  Person as PersonIcon,
+  MoreVert as MoreVertIcon,
+  Search as SearchIcon,
+  EmojiEmotions as EmojiIcon,
+  AttachFile as AttachFileIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
-	connectSocket,
-	disconnectSocket,
-	sendMessage,
-	joinRoom,
-	leaveRoom,
+  connectSocket,
+  disconnectSocket,
+  sendMessage,
+  joinRoom,
+  leaveRoom,
 } from '../services/socket';
+import EmojiPicker from 'emoji-picker-react';
 
 const DRAWER_WIDTH = 300;
 
+const formatTimestamp = (timestamp) => {
+  const date = new Date(timestamp);
+  const now = new Date();
+  const diff = now - date;
+  const oneDay = 24 * 60 * 60 * 1000;
+
+  if (diff < oneDay) {
+    // Today - show time
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else if (diff < 2 * oneDay) {
+    // Yesterday
+    return 'Yesterday';
+  } else {
+    // Show date
+    return date.toLocaleDateString();
+  }
+};
+
+const truncateMessage = (message, maxLength = 30) => {
+  if (!message) return '';
+  return message.length > maxLength ? message.substring(0, maxLength) + '...' : message;
+};
+
 const Chat = () => {
-	const [message, setMessage] = useState('');
-	const [messages, setMessages] = useState([]);
-	const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
-	const [isLoggingOut, setIsLoggingOut] = useState(false);
-	const [selectedChat, setSelectedChat] = useState(null);
-	const [users, setUsers] = useState([]);
-	const [loading, setLoading] = useState(true);
-	const messagesEndRef = useRef(null);
-	const navigate = useNavigate();
-	const { auth } = useFirebase();
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [error, setError] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState(new Set());
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [anchorEl, setAnchorEl] = useState(null);
+  const [unreadMessages, setUnreadMessages] = useState({});
+  
+  const messagesEndRef = useRef(null);
+  const messageInputRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
+  const navigate = useNavigate();
+  const { auth } = useFirebase();
 
-	// Fetch users
-	useEffect(() => {
-		const fetchUsers = async () => {
-			if (!auth.currentUser) return;
+  const filteredUsers = users.filter(user => 
+    user.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-			try {
-				setLoading(true);
-				const response = await fetch('/api/users');
-				if (!response.ok) {
-					throw new Error('Failed to fetch users');
-				}
-				const usersList = await response.json();
+  useEffect(() => {
+    const fetchUsers = async () => {
+      if (!auth.currentUser) {
+        console.log('No current user found');
+        return;
+      }
 
-				const chatsWithUsers = usersList?.data
-					?.filter((user) => user.id !== auth.currentUser.uid)
-					.map((user) => ({
-						id: user.id,
-						name: user.first_name,
-						lastMessage: 'No messages yet',
-					}));
-				console.log(chatsWithUsers);
+      try {
+        setIsLoading(true);
+        setError(null);
+        console.log('Current user:', auth.currentUser.uid);
 
-				setUsers(chatsWithUsers);
-			} catch (error) {
-				console.error('Error fetching users:', error);
-			} finally {
-				setLoading(false);
-			}
-		};
+        // First try to get users with chat history
+        let response = await fetch(`/api/chat/users/${auth.currentUser.uid}`);
+        let data = await response.json();
+        console.log('Chat users response:', data);
 
-		fetchUsers();
-	}, [auth.currentUser]);
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to fetch users');
+        }
 
-	// Connect socket and join room when chat is selected
-	useEffect(() => {
-		if (!selectedChat || !auth.currentUser) return;
+        let processedUsers = [];
 
-		// Connect socket
-		const socket = connectSocket(auth.currentUser.uid);
+        // Check if we have the new format (with user and latestMessage properties)
+        if (data.data && Array.isArray(data.data) && data.data.length > 0 && data.data[0].user) {
+          console.log('Processing new format response');
+          processedUsers = data.data.map(item => ({
+            firebase_uid: item.user.firebase_uid,
+            first_name: item.user.first_name,
+            last_name: item.user.last_name,
+            email: item.user.email,
+            lastMessage: item.latestMessage ? {
+              text: item.latestMessage.message,
+              timestamp: item.latestMessage.created_at,
+              isOutgoing: item.latestMessage.sender_id === auth.currentUser.uid
+            } : null
+          }));
+        } 
+        // Check if we have users with lastMessage already in the expected format
+        else if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+          console.log('Processing standard format response');
+          processedUsers = data.data;
+        } 
+        // If no users found with chat history, get all users
+        else {
+          console.log('No chat users found, fetching all users');
+          response = await fetch('/api/users');
+          data = await response.json();
+          console.log('All users response:', data);
 
-		// Join room using your exact logic
-		joinRoom(auth.currentUser.uid, selectedChat.id);
+          if (!response.ok) {
+            throw new Error(data.message || 'Failed to fetch users');
+          }
 
-		// Listen for new messages
-		socket.on('receive_message', (newMessage) => {
-			setMessages((prev) => [...prev, newMessage]);
-			scrollToBottom();
-		});
+          // Transform users data to match chat users format
+          processedUsers = data.data
+            .filter(user => user.firebase_uid !== auth.currentUser.uid)
+            .map(user => ({
+              ...user,
+              lastMessage: null
+            }));
+        }
 
-		// Fetch previous messages for this room
-		const roomName = `${[auth.currentUser.uid, selectedChat.id]
-			.sort()
-			.join('-')}`;
-		fetch(`/api/messages/${roomName}`)
-			.then((response) => response.json())
-			.then((data) => {
-				setMessages(data);
-				scrollToBottom();
-			})
-			.catch((error) => console.error('Error fetching messages:', error));
+        console.log('Processed users:', processedUsers);
+        setUsers(processedUsers);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        setError(error.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-		return () => {
-			// Leave room and disconnect when changing chat or unmounting
-			leaveRoom();
-			disconnectSocket();
-		};
-	}, [selectedChat, auth.currentUser]);
+    fetchUsers();
 
-	const scrollToBottom = () => {
-		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-	};
+    // Set up socket listener for new messages
+    const socket = connectSocket(auth.currentUser?.uid);
+    
+    socket.on('receive_message', (newMessage) => {
+      console.log('Received new message:', newMessage);
+      
+      // Update users list with latest message
+      setUsers(prevUsers => {
+        return prevUsers.map(user => {
+          if (user.firebase_uid === newMessage.sender_id || user.firebase_uid === newMessage.receiver_id) {
+            return {
+              ...user,
+              lastMessage: {
+                text: newMessage.message,
+                timestamp: newMessage.created_at,
+                isOutgoing: newMessage.sender_id === auth.currentUser.uid
+              }
+            };
+          }
+          return user;
+        });
+      });
 
-	const handleLogoutClick = () => {
-		setIsLogoutDialogOpen(true);
-	};
+      // Update messages array if the message belongs to the current chat
+      if (selectedChat && 
+          (newMessage.sender_id === selectedChat.firebase_uid || 
+           newMessage.receiver_id === selectedChat.firebase_uid)) {
+        
+        const formattedMessage = {
+          id: newMessage.id,
+          text: newMessage.message,
+          senderId: newMessage.sender_id,
+          receiverId: newMessage.receiver_id,
+          senderName: newMessage.sender ? 
+            `${newMessage.sender.first_name} ${newMessage.sender.last_name}` : 
+            'Unknown',
+          timestamp: newMessage.created_at,
+          status: newMessage.status,
+          message_type: newMessage.message_type
+        };
+        
+        setMessages(prevMessages => [...prevMessages, formattedMessage]);
+        
+        // Scroll to bottom after adding new message
+        setTimeout(scrollToBottom, 100);
+      } else {
+        // Increment unread count for chats not currently selected
+        if (newMessage.sender_id !== auth.currentUser.uid) {
+          setUnreadMessages(prev => ({
+            ...prev,
+            [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1
+          }));
+        }
+      }
+    });
 
-	const handleLogoutConfirm = async () => {
-		setIsLoggingOut(true);
-		try {
-			disconnectSocket();
-			await signOut(auth);
-			navigate('/');
-		} catch (error) {
-			console.error('Error signing out:', error);
-		} finally {
-			setIsLoggingOut(false);
-			setIsLogoutDialogOpen(false);
-		}
-	};
+    return () => {
+      socket.off('receive_message');
+    };
+  }, [auth.currentUser]);
 
-	const handleLogoutCancel = () => {
-		setIsLogoutDialogOpen(false);
-	};
+  useEffect(() => {
+    if (selectedChat) {
+      fetchMessages();
+      const roomName = generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid);
+      joinRoom(roomName);
+      
+      // Clear unread messages for selected chat
+      setUnreadMessages(prev => ({
+        ...prev,
+        [selectedChat.firebase_uid]: 0
+      }));
+    }
 
-	const handleChatSelect = (chat) => {
-		setSelectedChat(chat);
-		setMessages([]); // Clear previous messages
-	};
+    return () => {
+      if (selectedChat) {
+        leaveRoom();
+      }
+    };
+  }, [selectedChat, auth.currentUser]);
 
-	const handleSendMessage = (e) => {
-		e.preventDefault();
-		if (!message.trim() || !selectedChat) return;
+  const fetchMessages = async () => {
+    if (!selectedChat) return;
 
-		const newMessage = {
-			text: message.trim(),
-			senderId: auth.currentUser.uid,
-			receiverId: selectedChat.id,
-			senderName: auth.currentUser.email?.split('@')[0],
-			timestamp: new Date().toISOString(),
-		};
+    try {
+      const roomName = generateRoomName(
+        auth.currentUser.uid,
+        selectedChat.firebase_uid
+      );
+      const response = await fetch(`/api/messages/${roomName}`);
+      if (!response.ok) throw new Error('Failed to fetch messages');
+      const data = await response.json();
+      setMessages(data);
+      scrollToBottom();
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+    }
+  };
 
-		sendMessage(newMessage);
-		setMessage('');
-	};
+  const generateRoomName = (userId1, userId2) => {
+    return [userId1, userId2].sort().join('-');
+  };
 
-	return (
-		<Box sx={{ display: 'flex', height: '100vh' }}>
-			{/* Sidebar */}
-			<Drawer
-				variant="permanent"
-				sx={{
-					width: DRAWER_WIDTH,
-					flexShrink: 0,
-					'& .MuiDrawer-paper': {
-						width: DRAWER_WIDTH,
-						boxSizing: 'border-box',
-					},
-				}}
-			>
-				<Toolbar />
-				{loading ? (
-					<Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-						<CircularProgress />
-					</Box>
-				) : (
-					<List sx={{ width: '100%', bgcolor: 'background.paper' }}>
-						{users.map((user) => (
-							<React.Fragment key={user.id}>
-								<ListItem
-									button
-									selected={selectedChat?.id === user.id}
-									onClick={() => handleChatSelect(user)}
-								>
-									<ListItemAvatar>
-										<Avatar>
-											<PersonIcon />
-										</Avatar>
-									</ListItemAvatar>
-									<ListItemText
-										primary={user.name}
-										secondary={user.lastMessage}
-									/>
-									{user.unreadCount > 0 && (
-										<Badge badgeContent={user.unreadCount} color="primary" />
-									)}
-								</ListItem>
-								<Divider variant="inset" component="li" />
-							</React.Fragment>
-						))}
-					</List>
-				)}
-			</Drawer>
+  const handleMessageChange = (e) => {
+    setMessage(e.target.value);
+    handleTyping();
+  };
 
-			{/* Main Chat Area */}
-			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-				<AppBar
-					position="fixed"
-					sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
-				>
-					<Toolbar>
-						<Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-							{selectedChat
-								? `Chat with ${selectedChat.name}`
-								: 'Select a chat'}
-						</Typography>
-						<Button
-							color="inherit"
-							onClick={handleLogoutClick}
-							startIcon={<ExitToAppIcon />}
-							disabled={isLoggingOut}
-						>
-							{isLoggingOut ? 'Logging out...' : 'Logout'}
-						</Button>
-					</Toolbar>
-				</AppBar>
-				<Toolbar />
+  const handleTyping = () => {
+    if (!selectedChat) return;
 
-				{selectedChat ? (
-					<>
-						<Box
-							sx={{
-								flexGrow: 1,
-								overflow: 'auto',
-								p: 2,
-								backgroundColor: '#f5f5f5',
-							}}
-						>
-							<Container maxWidth="md">
-								{messages.map((msg, index) => (
-									<Box
-										key={msg.timestamp || index}
-										sx={{
-											display: 'flex',
-											justifyContent:
-												msg.senderId === auth.currentUser.uid
-													? 'flex-end'
-													: 'flex-start',
-											mb: 2,
-										}}
-									>
-										<Paper
-											elevation={2}
-											sx={{
-												p: 2,
-												maxWidth: '70%',
-												backgroundColor:
-													msg.senderId === auth.currentUser.uid
-														? '#1976d2'
-														: '#fff',
-												color:
-													msg.senderId === auth.currentUser.uid
-														? '#fff'
-														: '#000',
-											}}
-										>
-											<Typography
-												variant="subtitle2"
-												sx={{ fontWeight: 'bold' }}
-											>
-												{msg.senderName}
-											</Typography>
-											<Typography variant="body1">{msg.text}</Typography>
-										</Paper>
-									</Box>
-								))}
-								<div ref={messagesEndRef} />
-							</Container>
-						</Box>
+    const socket = connectSocket(auth.currentUser.uid);
+    socket.emit('typing', {
+      conversation_id: generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid),
+      user_id: auth.currentUser.uid
+    });
 
-						<Paper
-							component="form"
-							onSubmit={handleSendMessage}
-							sx={{
-								p: 2,
-								borderTop: '1px solid #e0e0e0',
-							}}
-						>
-							<Box sx={{ display: 'flex', gap: 1 }}>
-								<TextField
-									fullWidth
-									value={message}
-									onChange={(e) => setMessage(e.target.value)}
-									placeholder="Type a message..."
-									variant="outlined"
-									size="small"
-								/>
-								<Button
-									type="submit"
-									variant="contained"
-									endIcon={<SendIcon />}
-								>
-									Send
-								</Button>
-							</Box>
-						</Paper>
-					</>
-				) : (
-					<Box
-						sx={{
-							display: 'flex',
-							justifyContent: 'center',
-							alignItems: 'center',
-							height: '100%',
-							bgcolor: '#f5f5f5',
-						}}
-					>
-						<Typography variant="h6" color="textSecondary">
-							Select a chat to start messaging
-						</Typography>
-					</Box>
-				)}
-			</Box>
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
 
-			<Dialog
-				open={isLogoutDialogOpen}
-				onClose={handleLogoutCancel}
-				aria-labelledby="logout-dialog-title"
-			>
-				<DialogTitle id="logout-dialog-title">Confirm Logout</DialogTitle>
-				<DialogContent>
-					<Typography>
-						Are you sure you want to logout? You will need to sign in again to
-						continue chatting.
-					</Typography>
-				</DialogContent>
-				<DialogActions>
-					<Button onClick={handleLogoutCancel} disabled={isLoggingOut}>
-						Cancel
-					</Button>
-					<Button
-						onClick={handleLogoutConfirm}
-						color="primary"
-						variant="contained"
-						disabled={isLoggingOut}
-						startIcon={isLoggingOut ? <CircularProgress size={20} /> : null}
-					>
-						{isLoggingOut ? 'Logging out...' : 'Logout'}
-					</Button>
-				</DialogActions>
-			</Dialog>
-		</Box>
-	);
+    typingTimeoutRef.current = setTimeout(() => {
+      socket.emit('stop_typing', {
+        conversation_id: generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid),
+        user_id: auth.currentUser.uid
+      });
+    }, 1000);
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (!message.trim() || !selectedChat) return;
+
+    const messageData = {
+      text: message.trim(),
+      senderId: auth.currentUser.uid,
+      receiverId: selectedChat.firebase_uid,
+      senderName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0],
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      await sendMessage(messageData);
+      setMessage('');
+      messageInputRef.current?.focus();
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const handleEmojiClick = (emojiData) => {
+    setMessage(prev => prev + emojiData.emoji);
+    setShowEmojiPicker(false);
+    messageInputRef.current?.focus();
+  };
+
+  const handleUserMenuClick = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleUserMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate('/');
+    } catch (error) {
+      console.error('Error signing out:', error);
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <Box sx={{ display: 'flex', height: '100vh' }}>
+      {/* Sidebar */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: DRAWER_WIDTH,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: DRAWER_WIDTH,
+            boxSizing: 'border-box',
+          },
+        }}
+      >
+        <Toolbar />
+        <Box sx={{ overflow: 'auto' }}>
+          <TextField
+            fullWidth
+            placeholder="Search users..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            sx={{ p: 2 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon />
+                </InputAdornment>
+              ),
+            }}
+          />
+          {error && (
+            <Alert severity="error" sx={{ mx: 2, mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {isLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : users.length === 0 ? (
+            <Box sx={{ p: 2, textAlign: 'center' }}>
+              <Typography color="textSecondary">
+                No users found
+              </Typography>
+            </Box>
+          ) : (
+            <List>
+              {filteredUsers.map((user) => (
+                <React.Fragment key={user.firebase_uid}>
+                  <ListItem
+                    button
+                    selected={selectedChat?.firebase_uid === user.firebase_uid}
+                    onClick={() => setSelectedChat(user)}
+                  >
+                    <ListItemAvatar>
+                      <Avatar>
+                        {user.first_name?.[0]}{user.last_name?.[0]}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText
+                      primary={`${user.first_name || ''} ${user.last_name || ''}`}
+                      secondary={
+                        <Box component="span" sx={{ display: 'flex', flexDirection: 'column' }}>
+                          <Typography
+                            component="span"
+                            variant="body2"
+                            color="text.primary"
+                            sx={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 0.5,
+                              color: user.lastMessage?.isOutgoing ? 'text.secondary' : 'inherit'
+                            }}
+                          >
+                            {user.lastMessage?.isOutgoing && <SendIcon sx={{ fontSize: 12 }} />}
+                            {user.lastMessage ? truncateMessage(user.lastMessage.text) : 'No messages yet'}
+                          </Typography>
+                          {user.lastMessage && (
+                            <Typography
+                              component="span"
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              {formatTimestamp(user.lastMessage.timestamp)}
+                            </Typography>
+                          )}
+                        </Box>
+                      }
+                    />
+                    {unreadMessages[user.firebase_uid] > 0 && (
+                      <Badge
+                        badgeContent={unreadMessages[user.firebase_uid]}
+                        color="primary"
+                      />
+                    )}
+                  </ListItem>
+                  <Divider variant="inset" component="li" />
+                </React.Fragment>
+              ))}
+            </List>
+          )}
+        </Box>
+      </Drawer>
+
+      {/* Main Chat Area */}
+      <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+        <AppBar position="fixed" sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}>
+          <Toolbar>
+            <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+              {selectedChat
+                ? `Chat with ${selectedChat.first_name} ${selectedChat.last_name}`
+                : 'Select a chat'}
+            </Typography>
+            <IconButton
+              color="inherit"
+              onClick={handleUserMenuClick}
+            >
+              <MoreVertIcon />
+            </IconButton>
+            <Menu
+              anchorEl={anchorEl}
+              open={Boolean(anchorEl)}
+              onClose={handleUserMenuClose}
+            >
+              <MenuItem onClick={() => {
+                handleUserMenuClose();
+                setIsLogoutDialogOpen(true);
+              }}>
+                <ExitToAppIcon sx={{ mr: 1 }} />
+                Logout
+              </MenuItem>
+            </Menu>
+          </Toolbar>
+        </AppBar>
+        <Toolbar />
+
+        {selectedChat ? (
+          <>
+            <Box
+              sx={{
+                flexGrow: 1,
+                overflow: 'auto',
+                p: 2,
+                backgroundColor: '#f5f5f5',
+              }}
+            >
+              <Container maxWidth="md">
+                {messages.map((msg, index) => (
+                  <Box
+                    key={msg.timestamp || index}
+                    sx={{
+                      display: 'flex',
+                      justifyContent: msg.senderId === auth.currentUser.uid
+                        ? 'flex-end'
+                        : 'flex-start',
+                      mb: 2,
+                    }}
+                  >
+                    {msg.senderId !== auth.currentUser.uid && (
+                      <Avatar sx={{ mr: 1 }}>
+                        <PersonIcon />
+                      </Avatar>
+                    )}
+                    <Paper
+                      elevation={2}
+                      sx={{
+                        p: 2,
+                        maxWidth: '70%',
+                        backgroundColor: msg.senderId === auth.currentUser.uid
+                          ? '#1976d2'
+                          : '#fff',
+                        color: msg.senderId === auth.currentUser.uid
+                          ? '#fff'
+                          : '#000',
+                        borderRadius: 2,
+                      }}
+                    >
+                      <Typography variant="body1">{msg.text}</Typography>
+                      <Typography
+                        variant="caption"
+                        sx={{
+                          display: 'block',
+                          mt: 0.5,
+                          color: msg.senderId === auth.currentUser.uid
+                            ? 'rgba(255, 255, 255, 0.7)'
+                            : 'rgba(0, 0, 0, 0.6)',
+                        }}
+                      >
+                        {new Date(msg.timestamp).toLocaleTimeString()}
+                      </Typography>
+                    </Paper>
+                    {msg.senderId === auth.currentUser.uid && (
+                      <Avatar sx={{ ml: 1 }}>
+                        <PersonIcon />
+                      </Avatar>
+                    )}
+                  </Box>
+                ))}
+                <div ref={messagesEndRef} />
+              </Container>
+            </Box>
+
+            <Paper
+              component="form"
+              onSubmit={handleSendMessage}
+              sx={{
+                p: 2,
+                borderTop: '1px solid #e0e0e0',
+              }}
+            >
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Tooltip title="Add emoji">
+                  <IconButton
+                    onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    size="small"
+                  >
+                    <EmojiIcon />
+                  </IconButton>
+                </Tooltip>
+                <Box sx={{ position: 'relative', flexGrow: 1 }}>
+                  {showEmojiPicker && (
+                    <Box sx={{
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      zIndex: 1,
+                    }}>
+                      <EmojiPicker
+                        onEmojiClick={handleEmojiClick}
+                        width={300}
+                        height={400}
+                      />
+                    </Box>
+                  )}
+                  <TextField
+                    fullWidth
+                    value={message}
+                    onChange={handleMessageChange}
+                    placeholder="Type a message..."
+                    variant="outlined"
+                    size="small"
+                    inputRef={messageInputRef}
+                    multiline
+                    maxRows={4}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(e);
+                      }
+                    }}
+                  />
+                </Box>
+                <Button
+                  type="submit"
+                  variant="contained"
+                  endIcon={<SendIcon />}
+                  disabled={!message.trim()}
+                >
+                  Send
+                </Button>
+              </Box>
+            </Paper>
+          </>
+        ) : (
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: '100%',
+              bgcolor: '#f5f5f5',
+            }}
+          >
+            <Typography variant="h6" color="textSecondary">
+              Select a chat to start messaging
+            </Typography>
+          </Box>
+        )}
+      </Box>
+
+      <Dialog
+        open={isLogoutDialogOpen}
+        onClose={() => setIsLogoutDialogOpen(false)}
+      >
+        <DialogTitle>Confirm Logout</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to logout? You will need to sign in again to
+            continue chatting.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsLogoutDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleLogout}
+            color="primary"
+            variant="contained"
+            startIcon={<ExitToAppIcon />}
+          >
+            Logout
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
 };
 
 export default Chat;
