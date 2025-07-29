@@ -275,10 +275,22 @@ const Chat = () => {
         };
         
         console.log('Formatted message:', formattedMessage);
-        
-        // Simplified: just add the message without duplicate checking for now
+
+        // Check for duplicate messages (prevent double-adding real messages)
         setMessages(prevMessages => {
           console.log('Previous messages count:', prevMessages.length);
+          
+          // Check if this exact message already exists (by ID)
+          const existingMessage = prevMessages.find(msg => 
+            msg.id && msg.id === formattedMessage.id
+          );
+          
+          if (existingMessage) {
+            console.log('❌ Duplicate message detected (same ID), not adding:', formattedMessage.id);
+            return prevMessages;
+          }
+          
+          console.log('✅ Adding new message to current chat:', formattedMessage);
           const newMessages = [...prevMessages, formattedMessage];
           console.log('New messages count:', newMessages.length);
           return newMessages;
@@ -394,47 +406,26 @@ const Chat = () => {
     }, 1000);
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
+  const handleSendMessage = async () => {
     if (!message.trim() || !selectedChat) return;
 
     const messageData = {
       text: message.trim(),
       senderId: auth.currentUser.uid,
       receiverId: selectedChat.firebase_uid,
-      senderName: auth.currentUser.displayName || auth.currentUser.email?.split('@')[0],
-      timestamp: new Date().toISOString(),
     };
 
-    // Add message to UI immediately for better UX
-    const optimisticMessage = {
-      id: `temp-${Date.now()}-${Math.random()}`, // Make it more unique
-      text: messageData.text,
-      senderId: messageData.senderId,
-      receiverId: messageData.receiverId,
-      senderName: messageData.senderName,
-      timestamp: messageData.timestamp,
-      status: 'sending',
-      message_type: 'text'
-    };
-    
-    setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+    // Clear the input immediately
     setMessage('');
     messageInputRef.current?.focus();
-    scrollToBottom();
 
     try {
       await sendMessage(messageData);
-      console.log('Message sent successfully via REST API');
-      // The real message will come via socket and replace the optimistic one
+      console.log('Message sent successfully via socket');
+      // The message will appear via the receive_message socket event
     } catch (error) {
       console.error('Error sending message:', error);
-      // Update the message status to 'failed' if sending fails
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === optimisticMessage.id ? {...msg, status: 'failed'} : msg
-        )
-      );
+      // Could show an error toast here
     }
   };
 
@@ -708,7 +699,10 @@ const Chat = () => {
 
             <Paper
               component="form"
-              onSubmit={handleSendMessage}
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSendMessage();
+              }}
               sx={{
                 p: 2,
                 borderTop: '1px solid #e0e0e0',
