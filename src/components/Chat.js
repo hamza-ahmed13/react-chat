@@ -38,6 +38,7 @@ import {
   Search as SearchIcon,
   EmojiEmotions as EmojiIcon,
   AttachFile as AttachFileIcon,
+  Notifications as NotificationsIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
@@ -293,10 +294,15 @@ const Chat = () => {
         
         // Increment unread count for chats not currently selected
         if (newMessage.sender_id !== auth.currentUser.uid) {
-          setUnreadMessages(prev => ({
-            ...prev,
-            [newMessage.sender_id]: (prev[newMessage.sender_id] || 0) + 1
-          }));
+          console.log('📬 Incrementing unread count for sender:', newMessage.sender_id);
+          setUnreadMessages(prev => {
+            const newCount = (prev[newMessage.sender_id] || 0) + 1;
+            console.log('📬 New unread count for', newMessage.sender_id, ':', newCount);
+            return {
+              ...prev,
+              [newMessage.sender_id]: newCount
+            };
+          });
         }
       }
     };
@@ -321,10 +327,14 @@ const Chat = () => {
       joinRoom(roomName);
       
       // Clear unread messages for selected chat
-      setUnreadMessages(prev => ({
-        ...prev,
-        [selectedChat.firebase_uid]: 0
-      }));
+      console.log('🧹 Clearing unread messages for selected chat:', selectedChat.firebase_uid);
+      setUnreadMessages(prev => {
+        console.log('🧹 Previous unread count:', prev[selectedChat.firebase_uid] || 0);
+        return {
+          ...prev,
+          [selectedChat.firebase_uid]: 0
+        };
+      });
       
       // Return cleanup function
       return () => {
@@ -508,6 +518,16 @@ const Chat = () => {
                     button
                     selected={selectedChat?.firebase_uid === user.firebase_uid}
                     onClick={() => setSelectedChat(user)}
+                    sx={{
+                      backgroundColor: unreadMessages[user.firebase_uid] > 0 && selectedChat?.firebase_uid !== user.firebase_uid 
+                        ? 'rgba(25, 118, 210, 0.08)' 
+                        : 'inherit',
+                      '&:hover': {
+                        backgroundColor: unreadMessages[user.firebase_uid] > 0 && selectedChat?.firebase_uid !== user.firebase_uid 
+                          ? 'rgba(25, 118, 210, 0.12)' 
+                          : 'rgba(0, 0, 0, 0.04)',
+                      },
+                    }}
                   >
                     <ListItemAvatar>
                       <Avatar>
@@ -515,7 +535,17 @@ const Chat = () => {
                       </Avatar>
                     </ListItemAvatar>
                     <ListItemText
-                      primary={`${user.first_name || ''} ${user.last_name || ''}`}
+                      primary={
+                        <Typography 
+                          sx={{ 
+                            fontWeight: unreadMessages[user.firebase_uid] > 0 && selectedChat?.firebase_uid !== user.firebase_uid 
+                              ? 'bold' 
+                              : 'normal' 
+                          }}
+                        >
+                          {`${user.first_name || ''} ${user.last_name || ''}`}
+                        </Typography>
+                      }
                       secondary={
                         <Box component="span" sx={{ display: 'flex', flexDirection: 'column' }}>
                           <Typography
@@ -544,11 +574,30 @@ const Chat = () => {
                         </Box>
                       }
                     />
-                    {unreadMessages[user.firebase_uid] > 0 && (
+                    {unreadMessages[user.firebase_uid] > 0 && selectedChat?.firebase_uid !== user.firebase_uid && (
                       <Badge
                         badgeContent={unreadMessages[user.firebase_uid]}
-                        color="primary"
-                      />
+                        color="error"
+                        sx={{
+                          '& .MuiBadge-badge': {
+                            right: -6,
+                            top: 8,
+                            minWidth: 20,
+                            height: 20,
+                            fontSize: '0.75rem',
+                            fontWeight: 'bold',
+                          },
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            backgroundColor: 'error.main',
+                          }}
+                        />
+                      </Badge>
                     )}
                   </ListItem>
                   <Divider variant="inset" component="li" />
