@@ -54,7 +54,8 @@ export const sendMessage = async (messageData) => {
   const roomName = generateRoomName(messageData.senderId, messageData.receiverId);
   
   try {
-    // Send message to backend
+    // Send message to backend via REST API only
+    // The backend will handle the socket emission
     const response = await fetch('/api/messages', {
       method: 'POST',
       headers: {
@@ -71,12 +72,6 @@ export const sendMessage = async (messageData) => {
     if (!response.ok) {
       throw new Error('Failed to send message');
     }
-
-    // Emit message through socket
-    socket.emit('send_message', {
-      ...messageData,
-      conversation_id: roomName,
-    });
 
     return true;
   } catch (error) {

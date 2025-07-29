@@ -165,6 +165,18 @@ const Chat = () => {
 
         console.log('Processed users:', processedUsers);
         setUsers(processedUsers);
+
+        // Join all potential chat rooms so we can receive messages in real-time
+        const socket = connectSocket(auth.currentUser.uid);
+        if (socket) {
+          processedUsers.forEach(user => {
+            const roomName = generateRoomName(auth.currentUser.uid, user.firebase_uid);
+            console.log(`Joining room for user ${user.first_name}: ${roomName}`);
+            socket.emit('join_room', roomName);
+          });
+        } else {
+          console.warn('Socket not available for joining rooms');
+        }
       } catch (error) {
         console.error('Error fetching users:', error);
         setError(error.message);
@@ -174,16 +186,46 @@ const Chat = () => {
     };
 
     fetchUsers();
+  }, [auth.currentUser]);
 
-    // Set up socket listener for new messages
-    const socket = connectSocket(auth.currentUser?.uid);
-    
-    socket.on('receive_message', (newMessage) => {
+  // Set up socket listener for new messages - separate useEffect with selectedChat dependency
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const socket = connectSocket(auth.currentUser.uid);
+    if (!socket) {
+      console.error('Failed to get socket connection');
+      return;
+    }
+
+    console.log('Setting up socket listener with selectedChat:', selectedChat?.first_name || 'none');
+    console.log('Socket connected:', socket.connected);
+
+    // Test socket connection
+    socket.on('connect', () => {
+      console.log('Socket connected in Chat component');
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Socket disconnected in Chat component');
+    });
+
+    const handleReceiveMessage = (newMessage) => {
       console.log('Received new message:', newMessage);
+      console.log('Current selectedChat:', selectedChat?.firebase_uid || 'none');
+      
+      // Ensure we're in the room for this conversation
+      const otherUserId = newMessage.sender_id === auth.currentUser.uid ? newMessage.receiver_id : newMessage.sender_id;
+      const roomName = generateRoomName(auth.currentUser.uid, otherUserId);
+      
+      // Join the room if we're not already in it (for new conversations)
+      if (socket && socket.connected) {
+        socket.emit('join_room', roomName);
+      }
       
       // Update users list with latest message
       setUsers(prevUsers => {
-        return prevUsers.map(user => {
+        const updatedUsers = prevUsers.map(user => {
           if (user.firebase_uid === newMessage.sender_id || user.firebase_uid === newMessage.receiver_id) {
             return {
               ...user,
@@ -196,12 +238,27 @@ const Chat = () => {
           }
           return user;
         });
+
+        // If the sender is not in our users list, we might need to fetch updated users
+        const senderExists = updatedUsers.some(user => user.firebase_uid === newMessage.sender_id);
+        const receiverExists = updatedUsers.some(user => user.firebase_uid === newMessage.receiver_id);
+        
+        if (!senderExists || !receiverExists) {
+          console.log('New user detected in message, might need to refresh user list');
+        }
+
+        return updatedUsers;
       });
 
       // Update messages array if the message belongs to the current chat
       if (selectedChat && 
           (newMessage.sender_id === selectedChat.firebase_uid || 
            newMessage.receiver_id === selectedChat.firebase_uid)) {
+        
+        console.log('✅ Message belongs to current chat, updating messages array');
+        console.log('Selected chat UID:', selectedChat.firebase_uid);
+        console.log('Message sender:', newMessage.sender_id);
+        console.log('Message receiver:', newMessage.receiver_id);
         
         const formattedMessage = {
           id: newMessage.id,
@@ -216,11 +273,24 @@ const Chat = () => {
           message_type: newMessage.message_type
         };
         
-        setMessages(prevMessages => [...prevMessages, formattedMessage]);
+        console.log('Formatted message:', formattedMessage);
+        
+        // Simplified: just add the message without duplicate checking for now
+        setMessages(prevMessages => {
+          console.log('Previous messages count:', prevMessages.length);
+          const newMessages = [...prevMessages, formattedMessage];
+          console.log('New messages count:', newMessages.length);
+          return newMessages;
+        });
         
         // Scroll to bottom after adding new message
         setTimeout(scrollToBottom, 100);
       } else {
+        console.log('❌ Message does not belong to current chat or no chat selected');
+        console.log('Selected chat UID:', selectedChat?.firebase_uid || 'none');
+        console.log('Message sender:', newMessage.sender_id);
+        console.log('Message receiver:', newMessage.receiver_id);
+        
         // Increment unread count for chats not currently selected
         if (newMessage.sender_id !== auth.currentUser.uid) {
           setUnreadMessages(prev => ({
@@ -229,17 +299,25 @@ const Chat = () => {
           }));
         }
       }
-    });
-
-    return () => {
-      socket.off('receive_message');
     };
-  }, [auth.currentUser]);
+
+    // Set up the event listener
+    socket.on('receive_message', handleReceiveMessage);
+
+    // Cleanup function
+    return () => {
+      socket.off('receive_message', handleReceiveMessage);
+      socket.off('connect');
+      socket.off('disconnect');
+    };
+  }, [auth.currentUser, selectedChat]); // Include selectedChat as dependency
 
   useEffect(() => {
     if (selectedChat) {
+      console.log('Selected chat changed to:', selectedChat.first_name, selectedChat.firebase_uid);
       fetchMessages();
       const roomName = generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid);
+      console.log('Joining room for selected chat:', roomName);
       joinRoom(roomName);
       
       // Clear unread messages for selected chat
@@ -250,8 +328,11 @@ const Chat = () => {
       
       // Return cleanup function
       return () => {
+        console.log('Leaving room for chat:', selectedChat.first_name);
         leaveRoom(roomName);
       };
+    } else {
+      console.log('No chat selected');
     }
   }, [selectedChat, auth.currentUser]);
 
@@ -317,7 +398,7 @@ const Chat = () => {
 
     // Add message to UI immediately for better UX
     const optimisticMessage = {
-      id: `temp-${Date.now()}`,
+      id: `temp-${Date.now()}-${Math.random()}`, // Make it more unique
       text: messageData.text,
       senderId: messageData.senderId,
       receiverId: messageData.receiverId,
@@ -334,12 +415,8 @@ const Chat = () => {
 
     try {
       await sendMessage(messageData);
-      // Update the message status to 'sent' after successful sending
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === optimisticMessage.id ? {...msg, status: 'sent'} : msg
-        )
-      );
+      console.log('Message sent successfully via REST API');
+      // The real message will come via socket and replace the optimistic one
     } catch (error) {
       console.error('Error sending message:', error);
       // Update the message status to 'failed' if sending fails
@@ -527,7 +604,7 @@ const Chat = () => {
               <Container maxWidth="md">
                 {messages.map((msg, index) => (
                   <Box
-                    key={msg.timestamp || index}
+                    key={msg.id || `temp-${msg.timestamp}-${index}`}
                     sx={{
                       display: 'flex',
                       justifyContent: msg.senderId === auth.currentUser.uid
