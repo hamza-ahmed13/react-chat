@@ -17,11 +17,11 @@ export function SocketProvider({ children }) {
 		console.log('Initializing socket connection for user:', auth.currentUser.uid);
 
 		// Initialize socket connection
-		const newSocket = io('/', {
+		const newSocket = io('http://localhost:3000', {
 			auth: {
 				token: auth.currentUser.uid, // Send user ID for authentication
 			},
-			path: '/socket.io'
+			transports: ['polling', 'websocket']
 		});
 
 		// Socket event listeners

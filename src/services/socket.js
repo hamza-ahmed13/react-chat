@@ -56,7 +56,7 @@ export const sendMessage = async (messageData) => {
   try {
     // Send message to backend via REST API only
     // The backend will handle the socket emission
-    const response = await fetch('/api/messages', {
+    const response = await fetch('http://localhost:3000/api/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

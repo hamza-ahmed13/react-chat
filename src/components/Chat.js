@@ -113,8 +113,8 @@ const Chat = () => {
         setError(null);
         console.log('Current user:', auth.currentUser.uid);
 
-        // First try to get users with chat history
-        let response = await fetch(`/api/chat/users/${auth.currentUser.uid}`);
+        // Try to fetch users with chat history first
+        let response = await fetch(`http://localhost:3000/api/chat/users/${auth.currentUser.uid}`);
         let data = await response.json();
         console.log('Chat users response:', data);
 
@@ -144,10 +144,10 @@ const Chat = () => {
           console.log('Processing standard format response');
           processedUsers = data.data;
         } 
-        // If no users found with chat history, get all users
+        // If no users found with chat history, fetch all users
         else {
-          console.log('No chat users found, fetching all users');
-          response = await fetch('/api/users');
+          console.log('No users with chat history found, fetching all users...');
+          response = await fetch('http://localhost:3000/api/users');
           data = await response.json();
           console.log('All users response:', data);
 
@@ -354,7 +354,7 @@ const Chat = () => {
         auth.currentUser.uid,
         selectedChat.firebase_uid
       );
-      const response = await fetch(`/api/messages/${roomName}`);
+      const response = await fetch(`http://localhost:3000/api/messages/${roomName}`);
       if (!response.ok) throw new Error('Failed to fetch messages');
       const data = await response.json();
       setMessages(data);
