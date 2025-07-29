@@ -247,13 +247,12 @@ const Chat = () => {
         ...prev,
         [selectedChat.firebase_uid]: 0
       }));
+      
+      // Return cleanup function
+      return () => {
+        leaveRoom(roomName);
+      };
     }
-
-    return () => {
-      if (selectedChat) {
-        leaveRoom();
-      }
-    };
   }, [selectedChat, auth.currentUser]);
 
   const fetchMessages = async () => {
@@ -316,12 +315,39 @@ const Chat = () => {
       timestamp: new Date().toISOString(),
     };
 
+    // Add message to UI immediately for better UX
+    const optimisticMessage = {
+      id: `temp-${Date.now()}`,
+      text: messageData.text,
+      senderId: messageData.senderId,
+      receiverId: messageData.receiverId,
+      senderName: messageData.senderName,
+      timestamp: messageData.timestamp,
+      status: 'sending',
+      message_type: 'text'
+    };
+    
+    setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+    setMessage('');
+    messageInputRef.current?.focus();
+    scrollToBottom();
+
     try {
       await sendMessage(messageData);
-      setMessage('');
-      messageInputRef.current?.focus();
+      // Update the message status to 'sent' after successful sending
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === optimisticMessage.id ? {...msg, status: 'sent'} : msg
+        )
+      );
     } catch (error) {
       console.error('Error sending message:', error);
+      // Update the message status to 'failed' if sending fails
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg.id === optimisticMessage.id ? {...msg, status: 'failed'} : msg
+        )
+      );
     }
   };
 

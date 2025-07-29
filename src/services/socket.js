@@ -36,15 +36,16 @@ export const disconnectSocket = () => {
   }
 };
 
-export const joinRoom = (userId, receiverId) => {
+export const joinRoom = (roomName) => {
   if (!socket) return;
-  const roomName = generateRoomName(userId, receiverId);
+  console.log('Joining room:', roomName);
   socket.emit('join_room', roomName);
 };
 
-export const leaveRoom = () => {
+export const leaveRoom = (roomName) => {
   if (!socket) return;
-  socket.emit('leave_room');
+  console.log('Leaving room:', roomName);
+  socket.emit('leave_room', roomName);
 };
 
 export const sendMessage = async (messageData) => {
