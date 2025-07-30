@@ -33,7 +33,6 @@ import {
 import {
 	Send as SendIcon,
 	ExitToApp as ExitToAppIcon,
-	Person as PersonIcon,
 	MoreVert as MoreVertIcon,
 	Search as SearchIcon,
 	EmojiEmotions as EmojiIcon,
@@ -81,6 +80,7 @@ const Chat = () => {
 	const [message, setMessage] = useState('');
 	const [messages, setMessages] = useState([]);
 	const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
+	const [currentUserProfile, setCurrentUserProfile] = useState(null);
 	const [isLoading, setIsLoading] = useState(true);
 	const [selectedChat, setSelectedChat] = useState(null);
 	const [users, setUsers] = useState([]);
@@ -104,6 +104,30 @@ const Chat = () => {
 			user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
+	// Fetch current user profile
+	const fetchCurrentUserProfile = async () => {
+		if (!auth.currentUser) return;
+
+		try {
+			const response = await fetch(
+				`http://localhost:3000/api/users/${auth.currentUser.uid}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+			
+			if (response.ok) {
+				const data = await response.json();
+				setCurrentUserProfile(data.data);
+				console.log('Current user profile:', data.data);
+			}
+		} catch (error) {
+			console.error('Error fetching current user profile:', error);
+		}
+	};
+
 	useEffect(() => {
 		const fetchUsers = async () => {
 			if (!auth.currentUser) {
@@ -118,7 +142,7 @@ const Chat = () => {
 
 				// Try to fetch users with chat history first
 				let response = await fetch(
-					`https://a601e732605e.ngrok-free.app/api/chat/users/${auth.currentUser.uid}`,
+					`http://localhost:3000/api/chat/users/${auth.currentUser.uid}`,
 					{
 						headers: {
 							'ngrok-skip-browser-warning': 'true',
@@ -172,7 +196,7 @@ const Chat = () => {
 						'No users with chat history found, fetching all users...'
 					);
 					response = await fetch(
-						'https://a601e732605e.ngrok-free.app/api/users',
+						'http://localhost:3000/api/users',
 						{
 							headers: {
 								'ngrok-skip-browser-warning': 'true',
@@ -223,6 +247,7 @@ const Chat = () => {
 		};
 
 		fetchUsers();
+		fetchCurrentUserProfile();
 	}, [auth.currentUser]);
 
 	// Set up socket listener for new messages - separate useEffect with selectedChat dependency
@@ -403,6 +428,13 @@ const Chat = () => {
 		};
 	}, [auth.currentUser, selectedChat]); // Include selectedChat as dependency
 
+	// Scroll to bottom whenever messages change
+	useEffect(() => {
+		if (messages.length > 0) {
+			setTimeout(scrollToBottom, 100);
+		}
+	}, [messages]);
+
 	useEffect(() => {
 		if (selectedChat) {
 			console.log(
@@ -522,6 +554,8 @@ const Chat = () => {
 			await sendMessage(messageData);
 			console.log('Message sent successfully via socket');
 			// The message will appear via the receive_message socket event
+			// Scroll to bottom after sending
+			setTimeout(scrollToBottom, 100);
 		} catch (error) {
 			console.error('Error sending message:', error);
 			// Could show an error toast here
@@ -576,11 +610,45 @@ const Chat = () => {
 						placeholder="Search users..."
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
-						sx={{ p: 2 }}
+						variant="outlined"
+						sx={{ 
+							p: 2,
+							'& .MuiOutlinedInput-root': {
+								borderRadius: 4,
+								backgroundColor: '#f8f9fa',
+								transition: 'all 0.2s ease-in-out',
+								'&:hover': {
+									backgroundColor: '#e9ecef',
+									transform: 'translateY(-1px)',
+									boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+								},
+								'&.Mui-focused': {
+									backgroundColor: '#fff',
+									transform: 'translateY(-2px)',
+									boxShadow: '0 8px 25px rgba(25, 118, 210, 0.15)',
+									'& .MuiOutlinedInput-notchedOutline': {
+										borderColor: 'primary.main',
+										borderWidth: 2,
+									},
+								},
+								'& .MuiOutlinedInput-notchedOutline': {
+									borderColor: 'transparent',
+									transition: 'all 0.2s ease-in-out',
+								},
+							},
+							'& .MuiInputBase-input': {
+								fontSize: '0.95rem',
+								fontWeight: 500,
+							},
+						}}
 						InputProps={{
 							startAdornment: (
 								<InputAdornment position="start">
-									<SearchIcon />
+									<SearchIcon sx={{ 
+										color: 'text.secondary',
+										fontSize: '1.2rem',
+										transition: 'color 0.2s ease-in-out',
+									}} />
 								</InputAdornment>
 							),
 						}}
@@ -623,8 +691,8 @@ const Chat = () => {
 									>
 										<ListItemAvatar>
 											<Avatar>
-												{user.first_name?.[0]}
-												{user.last_name?.[0]}
+												{user.first_name?.[0]?.toUpperCase()}
+												{user.last_name?.[0]?.toUpperCase()}
 											</Avatar>
 										</ListItemAvatar>
 										<ListItemText
@@ -749,6 +817,28 @@ const Chat = () => {
 
 				{selectedChat ? (
 					<>
+						{/* Chat Header */}
+						<Paper
+							elevation={1}
+							sx={{
+								p: 2,
+								borderBottom: '1px solid #e0e0e0',
+								backgroundColor: '#fff',
+								display: 'flex',
+								alignItems: 'center',
+							}}
+						>
+							<Avatar sx={{ ml:3,mr: 1, bgcolor: 'primary.main' }}>
+								{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
+							</Avatar>
+							<Box>
+								<Typography variant="h6" sx={{ fontWeight: 'medium' }}>
+									{selectedChat.first_name} {selectedChat.last_name}
+								</Typography>
+							</Box>
+						</Paper>
+
+						{/* Messages Area */}
 						<Box
 							sx={{
 								flexGrow: 1,
@@ -757,7 +847,7 @@ const Chat = () => {
 								backgroundColor: '#f5f5f5',
 							}}
 						>
-							<Container maxWidth="md">
+							<Container >
 								{messages.map((msg, index) => (
 									<Box
 										key={msg.id || `temp-${msg.timestamp}-${index}`}
@@ -771,8 +861,8 @@ const Chat = () => {
 										}}
 									>
 										{msg.senderId !== auth.currentUser.uid && (
-											<Avatar sx={{ mr: 1 }}>
-												<PersonIcon />
+											<Avatar sx={{ mr: 1, bgcolor: 'grey.400' }}>
+												{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
 											</Avatar>
 										)}
 										<Paper
@@ -803,12 +893,19 @@ const Chat = () => {
 															: 'rgba(0, 0, 0, 0.6)',
 												}}
 											>
-												{new Date(msg.timestamp).toLocaleTimeString()}
+												{new Date(msg.timestamp).toLocaleTimeString([], { 
+													hour: '2-digit', 
+													minute: '2-digit',
+													hour12: true 
+												})}
 											</Typography>
 										</Paper>
 										{msg.senderId === auth.currentUser.uid && (
-											<Avatar sx={{ ml: 1 }}>
-												<PersonIcon />
+											<Avatar sx={{ ml: 1, bgcolor: 'primary.main' }}>
+												{currentUserProfile ? 
+													`${currentUserProfile.first_name?.[0]?.toUpperCase() || ''}${currentUserProfile.last_name?.[0]?.toUpperCase() || ''}` :
+													auth.currentUser?.email?.[0]?.toUpperCase() || 'U'
+												}
 											</Avatar>
 										)}
 									</Box>
@@ -872,14 +969,23 @@ const Chat = () => {
 										}}
 									/>
 								</Box>
-								<Button
-									type="submit"
-									variant="contained"
-									endIcon={<SendIcon />}
-									disabled={!message.trim()}
-								>
-									Send
-								</Button>
+								<IconButton
+								type="submit"
+								color="primary"
+								disabled={!message.trim()}
+								sx={{
+									color: 'primary.main',
+									'&:hover': {
+										color: 'primary.dark',
+										backgroundColor: 'transparent',
+									},
+									'&:disabled': {
+										color: 'grey.400',
+									},
+								}}
+							>
+								<SendIcon />
+							</IconButton>
 							</Box>
 						</Paper>
 					</>
