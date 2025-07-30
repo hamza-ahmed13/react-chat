@@ -17,7 +17,7 @@ export function SocketProvider({ children }) {
 		console.log('Initializing socket connection for user:', auth.currentUser.uid);
 
 		// Initialize socket connection
-		const newSocket = io('http://localhost:3000', {
+		const newSocket = io('https://cinnova-chat-api.deliveredoncloud.com', {
 			auth: {
 				token: auth.currentUser.uid, // Send user ID for authentication
 			},

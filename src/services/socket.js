@@ -5,7 +5,7 @@ let socket;
 export const connectSocket = (userId) => {
 	if (socket && socket.connected) return socket;
 
-	socket = io('https://a601e732605e.ngrok-free.app', {
+	socket = io('https://cinnova-chat-api.deliveredoncloud.com', {
 		autoConnect: true,
 		forceNew: true,
 		timeout: 10000,
