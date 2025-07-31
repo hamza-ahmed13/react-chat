@@ -110,7 +110,7 @@ const Chat = () => {
 
 		try {
 			const response = await fetch(
-				`http://localhost:3000/api/users/${auth.currentUser.uid}`,
+				`https://cinnova-chat-api.deliveredoncloud.com/api/users/${auth.currentUser.uid}`,
 				{
 					headers: {
 						'ngrok-skip-browser-warning': 'true',
@@ -142,7 +142,7 @@ const Chat = () => {
 
 				// Try to fetch users with chat history first
 				let response = await fetch(
-					`http://localhost:3000/api/chat/users/${auth.currentUser.uid}`,
+					`https://cinnova-chat-api.deliveredoncloud.com/api/chat/users/${auth.currentUser.uid}`,
 					{
 						headers: {
 							'ngrok-skip-browser-warning': 'true',
@@ -196,7 +196,7 @@ const Chat = () => {
 						'No users with chat history found, fetching all users...'
 					);
 					response = await fetch(
-						'http://localhost:3000/api/users',
+						'https://cinnova-chat-api.deliveredoncloud.com/api/users',
 						{
 							headers: {
 								'ngrok-skip-browser-warning': 'true',
@@ -485,7 +485,7 @@ const Chat = () => {
 				selectedChat.firebase_uid
 			);
 			const response = await fetch(
-				`https://a601e732605e.ngrok-free.app/api/messages/${roomName}`,
+				`https://cinnova-chat-api.deliveredoncloud.com/api/messages/${roomName}`,
 				{
 					headers: {
 						'ngrok-skip-browser-warning': 'true',
