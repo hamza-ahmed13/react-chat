@@ -5,11 +5,14 @@ let socket;
 export const connectSocket = (userId) => {
 	if (socket && socket.connected) return socket;
 
-	socket = io('https://cinnova-chat-api.deliveredoncloud.com', {
+	socket = io('http://localhost:8000', {
 		autoConnect: true,
-		forceNew: true,
-		timeout: 10000,
-		transports: ['polling', 'websocket'],
+		forceNew: false,
+		timeout: 20000,
+		transports: ['websocket', 'polling'],
+		reconnection: true,
+		reconnectionAttempts: 5,
+		reconnectionDelay: 1000,
 		extraHeaders: {
 			'ngrok-skip-browser-warning': 'true',
 		},
@@ -21,8 +24,20 @@ export const connectSocket = (userId) => {
 		socket.emit('set_user_id', userId);
 	});
 
-	socket.on('disconnect', () => {
-		console.log('Socket disconnected');
+	socket.on('disconnect', (reason) => {
+		console.log('Socket disconnected:', reason);
+	});
+
+	socket.on('connect_error', (error) => {
+		console.error('Socket connection error:', error);
+	});
+
+	socket.on('reconnect', (attemptNumber) => {
+		console.log('Socket reconnected after', attemptNumber, 'attempts');
+	});
+
+	socket.on('reconnect_error', (error) => {
+		console.error('Socket reconnection error:', error);
 	});
 
 	socket.on('connect_error', (error) => {
@@ -91,7 +106,7 @@ const generateRoomName = (userId1, userId2) => {
 	return [userId1, userId2].sort().join('-');
 };
 
-export default {
+const socketService = {
 	connectSocket,
 	disconnectSocket,
 	joinRoom,
@@ -100,3 +115,5 @@ export default {
 	emitTyping,
 	emitStopTyping,
 };
+
+export default socketService;

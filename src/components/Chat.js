@@ -8,8 +8,6 @@ import {
 	TextField,
 	Button,
 	Typography,
-	AppBar,
-	Toolbar,
 	IconButton,
 	Dialog,
 	DialogTitle,
@@ -19,16 +17,17 @@ import {
 	Drawer,
 	List,
 	ListItem,
+	ListItemButton,
 	ListItemText,
 	ListItemAvatar,
 	Avatar,
 	Divider,
 	Badge,
-	Tooltip,
 	Menu,
 	MenuItem,
 	InputAdornment,
 	Alert,
+	Snackbar,
 } from '@mui/material';
 import {
 	Send as SendIcon,
@@ -37,12 +36,15 @@ import {
 	Search as SearchIcon,
 	EmojiEmotions as EmojiIcon,
 	AttachFile as AttachFileIcon,
-	Notifications as NotificationsIcon,
+	Call as CallIcon,
+	VideoCall as VideoCallIcon,
+	DoneAll as DoneAllIcon,
+	Description as DocumentIcon,
+	Mic as MicIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
 	connectSocket,
-	disconnectSocket,
 	sendMessage,
 	joinRoom,
 	leaveRoom,
@@ -80,17 +82,16 @@ const Chat = () => {
 	const [message, setMessage] = useState('');
 	const [messages, setMessages] = useState([]);
 	const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
-	const [currentUserProfile, setCurrentUserProfile] = useState(null);
 	const [isLoading, setIsLoading] = useState(true);
 	const [selectedChat, setSelectedChat] = useState(null);
 	const [users, setUsers] = useState([]);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [error, setError] = useState(null);
-	const [isTyping, setIsTyping] = useState(false);
-	const [typingUsers, setTypingUsers] = useState(new Set());
 	const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 	const [anchorEl, setAnchorEl] = useState(null);
 	const [unreadMessages, setUnreadMessages] = useState({});
+	const [isUploading, setIsUploading] = useState(false);
+	const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
 
 	const messagesEndRef = useRef(null);
 	const messageInputRef = useRef(null);
@@ -104,29 +105,7 @@ const Chat = () => {
 			user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
-	// Fetch current user profile
-	const fetchCurrentUserProfile = async () => {
-		if (!auth.currentUser) return;
 
-		try {
-			const response = await fetch(
-				`https://cinnova-chat-api.deliveredoncloud.com/api/users/${auth.currentUser.uid}`,
-				{
-					headers: {
-						'ngrok-skip-browser-warning': 'true',
-					},
-				}
-			);
-			
-			if (response.ok) {
-				const data = await response.json();
-				setCurrentUserProfile(data.data);
-				console.log('Current user profile:', data.data);
-			}
-		} catch (error) {
-			console.error('Error fetching current user profile:', error);
-		}
-	};
 
 	useEffect(() => {
 		const fetchUsers = async () => {
@@ -142,7 +121,7 @@ const Chat = () => {
 
 				// Try to fetch users with chat history first
 				let response = await fetch(
-					`https://cinnova-chat-api.deliveredoncloud.com/api/chat/users/${auth.currentUser.uid}`,
+					`http://localhost:8000/api/chat/users/${auth.currentUser.uid}`,
 					{
 						headers: {
 							'ngrok-skip-browser-warning': 'true',
@@ -196,7 +175,7 @@ const Chat = () => {
 						'No users with chat history found, fetching all users...'
 					);
 					response = await fetch(
-						'https://cinnova-chat-api.deliveredoncloud.com/api/users',
+						'http://localhost:8000/api/users',
 						{
 							headers: {
 								'ngrok-skip-browser-warning': 'true',
@@ -247,7 +226,6 @@ const Chat = () => {
 		};
 
 		fetchUsers();
-		fetchCurrentUserProfile();
 	}, [auth.currentUser]);
 
 	// Set up socket listener for new messages - separate useEffect with selectedChat dependency
@@ -435,6 +413,31 @@ const Chat = () => {
 		}
 	}, [messages]);
 
+	const fetchMessages = React.useCallback(async () => {
+		if (!selectedChat) return;
+
+		try {
+			const roomName = generateRoomName(
+				auth.currentUser.uid,
+				selectedChat.firebase_uid
+			);
+			const response = await fetch(
+				`http://localhost:8000/api/messages/${roomName}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+			if (!response.ok) throw new Error('Failed to fetch messages');
+			const data = await response.json();
+			setMessages(data);
+			scrollToBottom();
+		} catch (error) {
+			console.error('Error fetching messages:', error);
+		}
+	}, [selectedChat, auth.currentUser]);
+
 	useEffect(() => {
 		if (selectedChat) {
 			console.log(
@@ -474,32 +477,9 @@ const Chat = () => {
 		} else {
 			console.log('No chat selected');
 		}
-	}, [selectedChat, auth.currentUser]);
+	}, [selectedChat, auth.currentUser, fetchMessages]);
 
-	const fetchMessages = async () => {
-		if (!selectedChat) return;
 
-		try {
-			const roomName = generateRoomName(
-				auth.currentUser.uid,
-				selectedChat.firebase_uid
-			);
-			const response = await fetch(
-				`https://cinnova-chat-api.deliveredoncloud.com/api/messages/${roomName}`,
-				{
-					headers: {
-						'ngrok-skip-browser-warning': 'true',
-					},
-				}
-			);
-			if (!response.ok) throw new Error('Failed to fetch messages');
-			const data = await response.json();
-			setMessages(data);
-			scrollToBottom();
-		} catch (error) {
-			console.error('Error fetching messages:', error);
-		}
-	};
 
 	const generateRoomName = (userId1, userId2) => {
 		return [userId1, userId2].sort().join('-');
@@ -568,6 +548,156 @@ const Chat = () => {
 		messageInputRef.current?.focus();
 	};
 
+	const handleFileSelect = (event) => {
+		const file = event.target.files[0];
+		if (file) {
+			handleSendFile(file);
+		}
+		// Reset the input
+		event.target.value = '';
+	};
+
+	const handleSendFile = async (file) => {
+		if (!file || !selectedChat || !auth.currentUser) return;
+
+		setIsUploading(true);
+		setSnackbar({ open: true, message: `Uploading ${file.name}...`, severity: 'info' });
+		
+		try {
+			const formData = new FormData();
+			formData.append('attachment', file);
+			formData.append('sender_id', auth.currentUser.uid);
+			formData.append('receiver_id', selectedChat.firebase_uid);
+			formData.append('conversation_id', generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid));
+			
+			if (message.trim()) {
+				formData.append('message', message.trim());
+			}
+
+			const response = await fetch('http://localhost:8000/api/messages/upload', {
+				method: 'POST',
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error('Failed to upload file');
+			}
+
+			const result = await response.json();
+			console.log('File uploaded successfully:', result);
+			
+			setSnackbar({ open: true, message: 'File sent successfully!', severity: 'success' });
+			
+			// Clear the message input if it was included
+			if (message.trim()) {
+				setMessage('');
+			}
+			
+		} catch (error) {
+			console.error('Error uploading file:', error);
+			setSnackbar({ open: true, message: 'Failed to send file. Please try again.', severity: 'error' });
+		} finally {
+			setIsUploading(false);
+		}
+	};
+
+	const renderMessageContent = (msg) => {
+		const hasAttachment = msg.attachment_url && msg.attachment_type;
+		const hasText = msg.text && msg.text.trim();
+
+		return (
+			<>
+				{hasAttachment && (
+					<Box sx={{ mb: hasText ? 1 : 0 }}>
+						{msg.message_type === 'image' && (
+							<Box
+								component="img"
+								src={`http://localhost:8000${msg.attachment_url}`}
+								alt={msg.attachment_name}
+								sx={{
+									maxWidth: '100%',
+									maxHeight: 300,
+									borderRadius: 1,
+									cursor: 'pointer',
+								}}
+								onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
+							/>
+						)}
+						{msg.message_type === 'video' && (
+							<Box
+								component="video"
+								src={`http://localhost:8000${msg.attachment_url}`}
+								controls
+								sx={{
+									maxWidth: '100%',
+									maxHeight: 300,
+									borderRadius: 1,
+								}}
+							/>
+						)}
+						{msg.message_type === 'audio' && (
+							<Box
+								component="audio"
+								src={`http://localhost:8000${msg.attachment_url}`}
+								controls
+								sx={{
+									width: '100%',
+									maxWidth: 300,
+								}}
+							/>
+						)}
+						{(msg.message_type === 'document' || msg.message_type === 'file') && (
+							<Box
+								sx={{
+									display: 'flex',
+									alignItems: 'center',
+									gap: 1,
+									p: 1,
+									backgroundColor: 'rgba(0,0,0,0.05)',
+									borderRadius: 1,
+																	cursor: 'pointer',
+							}}
+							onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
+						>
+							<DocumentIcon sx={{ color: '#667781', fontSize: '1.5rem' }} />
+								<Box sx={{ flexGrow: 1, minWidth: 0 }}>
+									<Typography
+										variant="body2"
+										sx={{
+											fontWeight: 'medium',
+											color: '#111b21',
+											overflow: 'hidden',
+											textOverflow: 'ellipsis',
+											whiteSpace: 'nowrap',
+										}}
+									>
+										{msg.attachment_name}
+									</Typography>
+									<Typography variant="caption" sx={{ color: '#667781' }}>
+										{msg.attachment_size ? `${(msg.attachment_size / 1024 / 1024).toFixed(1)} MB` : 'Document'}
+									</Typography>
+								</Box>
+							</Box>
+						)}
+					</Box>
+				)}
+				{hasText && (
+					<Typography 
+						variant="body2" 
+						sx={{ 
+							color: '#111b21',
+							fontSize: '0.875rem',
+							lineHeight: 1.4,
+							wordBreak: 'break-word',
+						}}
+					>
+						{msg.text}
+					</Typography>
+				)}
+			</>
+		);
+	};
+
 	const handleUserMenuClick = (event) => {
 		setAnchorEl(event.currentTarget);
 	};
@@ -590,8 +720,8 @@ const Chat = () => {
 	};
 
 	return (
-		<Box sx={{ display: 'flex', height: '100vh' }}>
-			{/* Sidebar */}
+		<Box sx={{ display: 'flex', height: '100vh', backgroundColor: '#f0f2f5' }}>
+			{/* WhatsApp Sidebar */}
 			<Drawer
 				variant="permanent"
 				sx={{
@@ -600,59 +730,81 @@ const Chat = () => {
 					'& .MuiDrawer-paper': {
 						width: DRAWER_WIDTH,
 						boxSizing: 'border-box',
+						backgroundColor: '#fff',
+						borderRight: '1px solid #e9edef',
 					},
 				}}
 			>
-				<Toolbar />
-				<Box sx={{ overflow: 'auto' }}>
+				{/* WhatsApp Header */}
+				<Box sx={{ 
+					backgroundColor: '#008069', 
+					color: 'white',
+					p: 2,
+					display: 'flex',
+					alignItems: 'center',
+					justifyContent: 'space-between'
+				}}>
+					<Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+						Chats
+					</Typography>
+					<Box sx={{ display: 'flex', gap: 1 }}>
+						<IconButton color="inherit" size="small">
+							<CallIcon />
+						</IconButton>
+						<IconButton color="inherit" size="small">
+							<VideoCallIcon />
+						</IconButton>
+						<IconButton color="inherit" size="small">
+							<MoreVertIcon />
+						</IconButton>
+					</Box>
+				</Box>
+
+				{/* Search Bar */}
+				<Box sx={{ p: 2, backgroundColor: '#fff' }}>
 					<TextField
 						fullWidth
-						placeholder="Search users..."
+						placeholder="Search or start new chat"
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
 						variant="outlined"
+						size="small"
 						sx={{ 
-							p: 2,
 							'& .MuiOutlinedInput-root': {
-								borderRadius: 4,
-								backgroundColor: '#f8f9fa',
-								transition: 'all 0.2s ease-in-out',
+								borderRadius: 3,
+								backgroundColor: '#f0f2f5',
 								'&:hover': {
-									backgroundColor: '#e9ecef',
-									transform: 'translateY(-1px)',
-									boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+									backgroundColor: '#e9edef',
 								},
 								'&.Mui-focused': {
 									backgroundColor: '#fff',
-									transform: 'translateY(-2px)',
-									boxShadow: '0 8px 25px rgba(25, 118, 210, 0.15)',
 									'& .MuiOutlinedInput-notchedOutline': {
-										borderColor: 'primary.main',
-										borderWidth: 2,
+										borderColor: '#008069',
 									},
 								},
 								'& .MuiOutlinedInput-notchedOutline': {
 									borderColor: 'transparent',
-									transition: 'all 0.2s ease-in-out',
 								},
 							},
 							'& .MuiInputBase-input': {
-								fontSize: '0.95rem',
-								fontWeight: 500,
+								fontSize: '0.9rem',
 							},
 						}}
 						InputProps={{
 							startAdornment: (
 								<InputAdornment position="start">
 									<SearchIcon sx={{ 
-										color: 'text.secondary',
-										fontSize: '1.2rem',
-										transition: 'color 0.2s ease-in-out',
+										color: '#667781',
+										fontSize: '1.1rem',
 									}} />
 								</InputAdornment>
 							),
 						}}
 					/>
+				</Box>
+
+				{/* Chat List */}
+				<Box sx={{ overflow: 'auto', flexGrow: 1 }}>
 					{error && (
 						<Alert severity="error" sx={{ mx: 2, mb: 2 }}>
 							{error}
@@ -664,116 +816,109 @@ const Chat = () => {
 						</Box>
 					) : users.length === 0 ? (
 						<Box sx={{ p: 2, textAlign: 'center' }}>
-							<Typography color="textSecondary">No users found</Typography>
+							<Typography color="textSecondary">No chats available</Typography>
 						</Box>
 					) : (
-						<List>
+						<List sx={{ p: 0 }}>
 							{filteredUsers.map((user) => (
 								<React.Fragment key={user.firebase_uid}>
-									<ListItem
-										button
-										selected={selectedChat?.firebase_uid === user.firebase_uid}
-										onClick={() => setSelectedChat(user)}
-										sx={{
-											backgroundColor:
-												unreadMessages[user.firebase_uid] > 0 &&
-												selectedChat?.firebase_uid !== user.firebase_uid
-													? 'rgba(25, 118, 210, 0.08)'
-													: 'inherit',
-											'&:hover': {
+									<ListItem disablePadding>
+										<ListItemButton
+											selected={selectedChat?.firebase_uid === user.firebase_uid}
+											onClick={() => setSelectedChat(user)}
+											sx={{
 												backgroundColor:
-													unreadMessages[user.firebase_uid] > 0 &&
-													selectedChat?.firebase_uid !== user.firebase_uid
-														? 'rgba(25, 118, 210, 0.12)'
-														: 'rgba(0, 0, 0, 0.04)',
-											},
-										}}
-									>
+													selectedChat?.firebase_uid === user.firebase_uid
+														? '#f0f2f5'
+														: 'inherit',
+												'&:hover': {
+													backgroundColor: '#f5f6f6',
+												},
+												py: 1.5,
+												px: 2,
+											}}
+										>
 										<ListItemAvatar>
-											<Avatar>
+											<Avatar sx={{ 
+												bgcolor: '#008069',
+												width: 49,
+												height: 49,
+												fontSize: '1.1rem',
+												fontWeight: 'bold'
+											}}>
 												{user.first_name?.[0]?.toUpperCase()}
 												{user.last_name?.[0]?.toUpperCase()}
 											</Avatar>
 										</ListItemAvatar>
 										<ListItemText
+											primaryTypographyProps={{ component: 'div' }}
+											secondaryTypographyProps={{ component: 'div' }}
 											primary={
-												<Typography
-													sx={{
-														fontWeight:
-															unreadMessages[user.firebase_uid] > 0 &&
-															selectedChat?.firebase_uid !== user.firebase_uid
-																? 'bold'
-																: 'normal',
-													}}
-												>
-													{`${user.first_name || ''} ${user.last_name || ''}`}
-												</Typography>
-											}
-											secondary={
-												<Box
-													component="span"
-													sx={{ display: 'flex', flexDirection: 'column' }}
-												>
+												<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
 													<Typography
-														component="span"
-														variant="body2"
-														color="text.primary"
 														sx={{
-															display: 'flex',
-															alignItems: 'center',
-															gap: 0.5,
-															color: user.lastMessage?.isOutgoing
-																? 'text.secondary'
-																: 'inherit',
+															fontWeight: unreadMessages[user.firebase_uid] > 0 ? 'bold' : 'normal',
+															fontSize: '0.95rem',
+															color: '#111b21',
 														}}
 													>
-														{user.lastMessage?.isOutgoing && (
-															<SendIcon sx={{ fontSize: 12 }} />
-														)}
-														{user.lastMessage
-															? truncateMessage(user.lastMessage.text)
-															: 'No messages yet'}
+														{`${user.first_name || ''} ${user.last_name || ''}`}
 													</Typography>
 													{user.lastMessage && (
 														<Typography
-															component="span"
 															variant="caption"
-															color="text.secondary"
+															sx={{
+																color: '#667781',
+																fontSize: '0.75rem',
+															}}
 														>
 															{formatTimestamp(user.lastMessage.timestamp)}
 														</Typography>
 													)}
 												</Box>
 											}
-										/>
-										{unreadMessages[user.firebase_uid] > 0 &&
-											selectedChat?.firebase_uid !== user.firebase_uid && (
-												<Badge
-													badgeContent={unreadMessages[user.firebase_uid]}
-													color="error"
-													sx={{
-														'& .MuiBadge-badge': {
-															right: -6,
-															top: 8,
-															minWidth: 20,
-															height: 20,
-															fontSize: '0.75rem',
-															fontWeight: 'bold',
-														},
-													}}
-												>
-													<Box
+											secondary={
+												<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
+													<Typography
+														component="span"
+														variant="body2"
 														sx={{
-															width: 8,
-															height: 8,
-															borderRadius: '50%',
-															backgroundColor: 'error.main',
+															color: unreadMessages[user.firebase_uid] > 0 ? '#111b21' : '#667781',
+															fontWeight: unreadMessages[user.firebase_uid] > 0 ? 'bold' : 'normal',
+															fontSize: '0.85rem',
+															overflow: 'hidden',
+															textOverflow: 'ellipsis',
+															whiteSpace: 'nowrap',
+															maxWidth: '180px',
 														}}
-													/>
-												</Badge>
-											)}
+													>
+														{user.lastMessage
+															? truncateMessage(user.lastMessage.text, 25)
+															: 'No messages yet'}
+													</Typography>
+													{unreadMessages[user.firebase_uid] > 0 && (
+														<Badge
+															badgeContent={unreadMessages[user.firebase_uid]}
+															sx={{
+																'& .MuiBadge-badge': {
+																	backgroundColor: '#25d366',
+																	color: 'white',
+																	fontSize: '0.7rem',
+																	fontWeight: 'bold',
+																	minWidth: 18,
+																	height: 18,
+																},
+															}}
+														>
+															<Box />
+														</Badge>
+													)}
+												</Box>
+											}
+										/>
+										</ListItemButton>
 									</ListItem>
-									<Divider variant="inset" component="li" />
+									<Divider sx={{ ml: 7, mr: 1 }} />
 								</React.Fragment>
 							))}
 						</List>
@@ -781,139 +926,166 @@ const Chat = () => {
 				</Box>
 			</Drawer>
 
-			{/* Main Chat Area */}
+			{/* WhatsApp Main Chat Area */}
 			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-				<AppBar
-					position="fixed"
-					sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
-				>
-					<Toolbar>
-						<Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-							{selectedChat
-								? `Chat with ${selectedChat.first_name} ${selectedChat.last_name}`
-								: 'Select a chat'}
-						</Typography>
-						<IconButton color="inherit" onClick={handleUserMenuClick}>
-							<MoreVertIcon />
-						</IconButton>
-						<Menu
-							anchorEl={anchorEl}
-							open={Boolean(anchorEl)}
-							onClose={handleUserMenuClose}
-						>
-							<MenuItem
-								onClick={() => {
-									handleUserMenuClose();
-									setIsLogoutDialogOpen(true);
-								}}
-							>
-								<ExitToAppIcon sx={{ mr: 1 }} />
-								Logout
-							</MenuItem>
-						</Menu>
-					</Toolbar>
-				</AppBar>
-				<Toolbar />
 
 				{selectedChat ? (
 					<>
-						{/* Chat Header */}
+						{/* WhatsApp Chat Header */}
 						<Paper
 							elevation={1}
 							sx={{
-								p: 2,
-								borderBottom: '1px solid #e0e0e0',
-								backgroundColor: '#fff',
+								backgroundColor: '#f0f2f5',
+								borderBottom: '1px solid #e9edef',
 								display: 'flex',
 								alignItems: 'center',
+								p: 1,
+								gap: 1,
 							}}
 						>
-							<Avatar sx={{ ml:3,mr: 1, bgcolor: 'primary.main' }}>
-								{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
+							<Avatar sx={{ 
+								bgcolor: '#008069',
+								width: 40,
+								height: 40,
+								fontSize: '1rem',
+								fontWeight: 'bold'
+							}}>
+								{selectedChat.first_name?.[0]?.toUpperCase()}
+								{selectedChat.last_name?.[0]?.toUpperCase()}
 							</Avatar>
-							<Box>
-								<Typography variant="h6" sx={{ fontWeight: 'medium' }}>
+							<Box sx={{ flexGrow: 1 }}>
+								<Typography variant="subtitle1" sx={{ 
+									fontWeight: '500',
+									color: '#111b21',
+									fontSize: '1rem'
+								}}>
 									{selectedChat.first_name} {selectedChat.last_name}
 								</Typography>
+								<Typography variant="caption" sx={{ 
+									color: '#667781',
+									fontSize: '0.8rem'
+								}}>
+									online
+								</Typography>
+							</Box>
+							<Box sx={{ display: 'flex', gap: 1 }}>
+								<IconButton size="small" sx={{ color: '#54656f' }}>
+									<CallIcon />
+								</IconButton>
+								<IconButton size="small" sx={{ color: '#54656f' }}>
+									<VideoCallIcon />
+								</IconButton>
+								<IconButton 
+									size="small" 
+									sx={{ color: '#54656f' }}
+									onClick={handleUserMenuClick}
+								>
+									<MoreVertIcon />
+								</IconButton>
+								<Menu
+									anchorEl={anchorEl}
+									open={Boolean(anchorEl)}
+									onClose={handleUserMenuClose}
+								>
+									<MenuItem onClick={() => {
+										handleUserMenuClose();
+										setIsLogoutDialogOpen(true);
+									}}>
+										<ExitToAppIcon sx={{ mr: 1 }} />
+										Logout
+									</MenuItem>
+								</Menu>
 							</Box>
 						</Paper>
 
-						{/* Messages Area */}
+						{/* WhatsApp Messages Area */}
 						<Box
 							sx={{
 								flexGrow: 1,
 								overflow: 'auto',
-								p: 2,
-								backgroundColor: '#f5f5f5',
+								backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23e9edef\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
+								backgroundColor: '#efeae2',
+								p: 1,
 							}}
 						>
-							<Container >
+							<Container maxWidth={false} sx={{ p: 0 }}>
 								{messages.map((msg, index) => (
 									<Box
 										key={msg.id || `temp-${msg.timestamp}-${index}`}
 										sx={{
 											display: 'flex',
-											justifyContent:
-												msg.senderId === auth.currentUser.uid
-													? 'flex-end'
-													: 'flex-start',
-											mb: 2,
+											justifyContent: msg.senderId === auth.currentUser.uid ? 'flex-end' : 'flex-start',
+											mb: 1,
+											px: 2,
 										}}
 									>
-										{msg.senderId !== auth.currentUser.uid && (
-											<Avatar sx={{ mr: 1, bgcolor: 'grey.400' }}>
-												{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
-											</Avatar>
-										)}
-										<Paper
-											elevation={2}
+										<Box
 											sx={{
-												p: 2,
-												maxWidth: '70%',
-												backgroundColor:
-													msg.senderId === auth.currentUser.uid
-														? '#1976d2'
-														: '#fff',
-												color:
-													msg.senderId === auth.currentUser.uid
-														? '#fff'
-														: '#000',
-												borderRadius: 2,
+												maxWidth: '65%',
+												backgroundColor: msg.senderId === auth.currentUser.uid ? '#d9fdd3' : '#ffffff',
+												borderRadius: '7.5px',
+												p: 1.5,
+												position: 'relative',
+												boxShadow: '0 1px 0.5px rgba(0,0,0,.13)',
+												'&::before': msg.senderId === auth.currentUser.uid ? {
+													content: '""',
+													position: 'absolute',
+													top: 0,
+													right: -8,
+													width: 0,
+													height: 0,
+													borderLeft: '8px solid #d9fdd3',
+													borderTop: '8px solid transparent',
+													borderBottom: '8px solid transparent',
+												} : {
+													content: '""',
+													position: 'absolute',
+													top: 0,
+													left: -8,
+													width: 0,
+													height: 0,
+													borderRight: '8px solid #ffffff',
+													borderTop: '8px solid transparent',
+													borderBottom: '8px solid transparent',
+												}
 											}}
 										>
-											<Typography variant="body1">{msg.text}</Typography>
-											<Typography
-												variant="caption"
-												sx={{
-													display: 'block',
-													mt: 0.5,
-													color:
-														msg.senderId === auth.currentUser.uid
-															? 'rgba(255, 255, 255, 0.7)'
-															: 'rgba(0, 0, 0, 0.6)',
-												}}
-											>
-												{new Date(msg.timestamp).toLocaleTimeString([], { 
-													hour: '2-digit', 
-													minute: '2-digit',
-													hour12: true 
-												})}
-											</Typography>
-										</Paper>
-										{msg.senderId === auth.currentUser.uid && (
-											<Avatar sx={{ ml: 1, bgcolor: 'primary.main' }}>
-												{currentUserProfile ? 
-													`${currentUserProfile.first_name?.[0]?.toUpperCase() || ''}${currentUserProfile.last_name?.[0]?.toUpperCase() || ''}` :
-													auth.currentUser?.email?.[0]?.toUpperCase() || 'U'
-												}
-											</Avatar>
-										)}
+											{renderMessageContent(msg)}
+											<Box sx={{ 
+												display: 'flex', 
+												justifyContent: 'flex-end', 
+												alignItems: 'center',
+												gap: 0.5,
+												mt: 0.5 
+											}}>
+												<Typography
+													variant="caption"
+													sx={{
+														color: '#667781',
+														fontSize: '0.6875rem',
+													}}
+												>
+													{new Date(msg.timestamp).toLocaleTimeString([], { 
+														hour: '2-digit', 
+														minute: '2-digit',
+														hour12: false 
+													})}
+												</Typography>
+												{msg.senderId === auth.currentUser.uid && (
+													<DoneAllIcon sx={{ 
+														fontSize: '1rem', 
+														color: '#53bdeb',
+													}} />
+												)}
+											</Box>
+										</Box>
 									</Box>
 								))}
 								<div ref={messagesEndRef} />
 							</Container>
 						</Box>
 
+						{/* WhatsApp Input Area */}
 						<Paper
 							component="form"
 							onSubmit={(e) => {
@@ -921,19 +1093,36 @@ const Chat = () => {
 								handleSendMessage();
 							}}
 							sx={{
-								p: 2,
-								borderTop: '1px solid #e0e0e0',
+								backgroundColor: '#f0f2f5',
+								borderTop: '1px solid #e9edef',
+								p: 1,
 							}}
 						>
-							<Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-								<Tooltip title="Add emoji">
-									<IconButton
-										onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-										size="small"
+							<Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+								<IconButton 
+									size="small" 
+									sx={{ color: '#54656f', mb: 0.5 }}
+									onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+								>
+									<EmojiIcon />
+								</IconButton>
+								<Box sx={{ position: 'relative' }}>
+									<input
+										type="file"
+										id="file-input"
+										style={{ display: 'none' }}
+										onChange={handleFileSelect}
+										accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
+									/>
+									<IconButton 
+										size="small" 
+										sx={{ color: '#54656f', mb: 0.5 }}
+										onClick={() => document.getElementById('file-input').click()}
+										disabled={isUploading}
 									>
-										<EmojiIcon />
+										<AttachFileIcon />
 									</IconButton>
-								</Tooltip>
+								</Box>
 								<Box sx={{ position: 'relative', flexGrow: 1 }}>
 									{showEmojiPicker && (
 										<Box
@@ -941,7 +1130,7 @@ const Chat = () => {
 												position: 'absolute',
 												bottom: '100%',
 												left: 0,
-												zIndex: 1,
+												zIndex: 1000,
 											}}
 										>
 											<EmojiPicker
@@ -955,12 +1144,32 @@ const Chat = () => {
 										fullWidth
 										value={message}
 										onChange={handleMessageChange}
-										placeholder="Type a message..."
+										placeholder="Type a message"
 										variant="outlined"
 										size="small"
 										inputRef={messageInputRef}
 										multiline
 										maxRows={4}
+										sx={{
+											'& .MuiOutlinedInput-root': {
+												borderRadius: '24px',
+												backgroundColor: '#ffffff',
+												fontSize: '0.9rem',
+												'& fieldset': {
+													borderColor: 'transparent',
+												},
+												'&:hover fieldset': {
+													borderColor: 'transparent',
+												},
+												'&.Mui-focused fieldset': {
+													borderColor: 'transparent',
+												},
+											},
+											'& .MuiInputBase-input': {
+												py: 1.25,
+												px: 2,
+											},
+										}}
 										onKeyPress={(e) => {
 											if (e.key === 'Enter' && !e.shiftKey) {
 												e.preventDefault();
@@ -970,22 +1179,31 @@ const Chat = () => {
 									/>
 								</Box>
 								<IconButton
-								type="submit"
-								color="primary"
-								disabled={!message.trim()}
-								sx={{
-									color: 'primary.main',
-									'&:hover': {
-										color: 'primary.dark',
-										backgroundColor: 'transparent',
-									},
-									'&:disabled': {
-										color: 'grey.400',
-									},
-								}}
-							>
-								<SendIcon />
-							</IconButton>
+									type="submit"
+									disabled={!message.trim() || isUploading}
+									sx={{
+										backgroundColor: (message.trim() && !isUploading) ? '#008069' : '#54656f',
+										color: 'white',
+										width: 40,
+										height: 40,
+										mb: 0.5,
+										'&:hover': {
+											backgroundColor: (message.trim() && !isUploading) ? '#006a56' : '#54656f',
+										},
+										'&:disabled': {
+											backgroundColor: '#54656f',
+											color: 'rgba(255,255,255,0.5)',
+										},
+									}}
+								>
+									{isUploading ? (
+										<CircularProgress size={20} sx={{ color: 'white' }} />
+									) : message.trim() ? (
+										<SendIcon />
+									) : (
+										<MicIcon />
+									)}
+								</IconButton>
 							</Box>
 						</Paper>
 					</>
@@ -993,14 +1211,44 @@ const Chat = () => {
 					<Box
 						sx={{
 							display: 'flex',
+							flexDirection: 'column',
 							justifyContent: 'center',
 							alignItems: 'center',
 							height: '100%',
-							bgcolor: '#f5f5f5',
+							backgroundColor: '#f0f2f5',
+							backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23e9edef\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
+							p: 4,
 						}}
 					>
-						<Typography variant="h6" color="textSecondary">
-							Select a chat to start messaging
+						<Box sx={{ 
+							backgroundColor: '#008069',
+							borderRadius: '50%',
+							width: 80,
+							height: 80,
+							display: 'flex',
+							alignItems: 'center',
+							justifyContent: 'center',
+							mb: 3,
+						}}>
+							<Typography variant="h3" sx={{ color: 'white', fontWeight: 'bold' }}>
+								💬
+							</Typography>
+						</Box>
+						<Typography variant="h5" sx={{ 
+							color: '#41525d',
+							fontWeight: '300',
+							mb: 1,
+							textAlign: 'center'
+						}}>
+							Chat App
+						</Typography>
+						<Typography variant="body1" sx={{ 
+							color: '#667781',
+							textAlign: 'center',
+							maxWidth: 400,
+							lineHeight: 1.5
+						}}>
+							
 						</Typography>
 					</Box>
 				)}
@@ -1029,6 +1277,22 @@ const Chat = () => {
 					</Button>
 				</DialogActions>
 			</Dialog>
+
+			{/* Upload Status Snackbar */}
+			<Snackbar
+				open={snackbar.open}
+				autoHideDuration={4000}
+				onClose={() => setSnackbar({ ...snackbar, open: false })}
+				anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+			>
+				<Alert 
+					onClose={() => setSnackbar({ ...snackbar, open: false })} 
+					severity={snackbar.severity}
+					sx={{ width: '100%' }}
+				>
+					{snackbar.message}
+				</Alert>
+			</Snackbar>
 		</Box>
 	);
 };

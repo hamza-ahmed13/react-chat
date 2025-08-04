@@ -11,7 +11,6 @@ import {
 	Box,
 	Alert,
 	CircularProgress,
-	Grid,
 } from '@mui/material';
 import { useFirebase } from '../contexts/FirebaseContext';
 
@@ -70,7 +69,7 @@ const Login = () => {
 		try {
 			if (isSignUp) {
 				// Backend signup
-				const response = await fetch('https://cinnova-chat-api.deliveredoncloud.com/api/users/signup', {
+				const response = await fetch('http://localhost:8000/api/users/signup', {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',

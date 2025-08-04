@@ -4,7 +4,7 @@ module.exports = function(app) {
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'https://cinnova-chat-api.deliveredoncloud.com',
+      target: 'http://localhost:8000',
       changeOrigin: true,
     })
   );
@@ -12,7 +12,7 @@ module.exports = function(app) {
   app.use(
     '/socket.io',
     createProxyMiddleware({
-      target: 'https://cinnova-chat-api.deliveredoncloud.com',
+      target: 'http://localhost:8000',
       changeOrigin: true,
       ws: true,
     })

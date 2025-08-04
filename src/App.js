@@ -11,7 +11,6 @@ import Chat from './components/Chat';
 import PrivateRoute from './components/PrivateRoute';
 import { Box, CircularProgress } from '@mui/material';
 import { FirebaseProvider, useFirebase } from './contexts/FirebaseContext';
-import { SocketProvider } from './contexts/SocketContext';
 
 const LoadingScreen = () => (
 	<Box
@@ -72,9 +71,7 @@ function App() {
 	return (
 		<Suspense fallback={<LoadingScreen />}>
 			<FirebaseProvider>
-				<SocketProvider>
-					<AppRoutes />
-				</SocketProvider>
+				<AppRoutes />
 			</FirebaseProvider>
 		</Suspense>
 	);
