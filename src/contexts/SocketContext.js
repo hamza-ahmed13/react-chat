@@ -14,14 +14,17 @@ export function SocketProvider({ children }) {
 			return;
 		}
 
-		console.log('Initializing socket connection for user:', auth.currentUser.uid);
+		console.log(
+			'Initializing socket connection for user:',
+			auth.currentUser.uid
+		);
 
 		// Initialize socket connection
-		const newSocket = io('https://cinnova-chat-api.deliveredoncloud.com', {
+		const newSocket = io('http://localhost:3000', {
 			auth: {
 				token: auth.currentUser.uid, // Send user ID for authentication
 			},
-			transports: ['polling', 'websocket']
+			transports: ['polling', 'websocket'],
 		});
 
 		// Socket event listeners

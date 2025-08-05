@@ -29,6 +29,15 @@ import {
 	MenuItem,
 	InputAdornment,
 	Alert,
+	Chip,
+	Stack,
+	useTheme,
+	alpha,
+	Checkbox,
+	FormControlLabel,
+	Tab,
+	Tabs,
+	AvatarGroup,
 } from '@mui/material';
 import {
 	Send as SendIcon,
@@ -37,7 +46,22 @@ import {
 	Search as SearchIcon,
 	EmojiEmotions as EmojiIcon,
 	AttachFile as AttachFileIcon,
-	Notifications as NotificationsIcon,
+	Phone as PhoneIcon,
+	VideoCall as VideoCallIcon,
+	Info as InfoIcon,
+	Check as CheckIcon,
+	DoneAll as DoneAllIcon,
+	AccessTime as AccessTimeIcon,
+	Circle as CircleIcon,
+	ArrowBack as ArrowBackIcon,
+	Group as GroupIcon,
+	Add as AddIcon,
+	GroupAdd as GroupAddIcon,
+	PersonAdd as PersonAddIcon,
+	Edit as EditIcon,
+	Delete as DeleteIcon,
+	ExitToApp as LeaveGroupIcon,
+	AdminPanelSettings as AdminIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
@@ -46,10 +70,32 @@ import {
 	sendMessage,
 	joinRoom,
 	leaveRoom,
+	joinGroup,
+	leaveGroup,
+	emitTyping,
+	emitStopTyping,
+	emitGroupTyping,
+	emitStopGroupTyping,
 } from '../services/socket';
 import EmojiPicker from 'emoji-picker-react';
 
-const DRAWER_WIDTH = 300;
+const DRAWER_WIDTH = 400;
+
+// WhatsApp color palette
+const WHATSAPP_COLORS = {
+	primary: '#00a884', // WhatsApp green
+	primaryDark: '#008069',
+	secondary: '#25d366',
+	background: '#0b141a', // Dark background
+	surface: '#202c33', // Chat surface
+	surfaceVariant: '#2a3942',
+	onSurface: '#e9edef',
+	onSurfaceVariant: '#8696a0',
+	outgoingMessage: '#005c4b', // Outgoing message bubble
+	incomingMessage: '#202c33', // Incoming message bubble
+	divider: '#8696a026',
+	online: '#00d448',
+};
 
 const formatTimestamp = (timestamp) => {
 	const date = new Date(timestamp);
@@ -69,11 +115,45 @@ const formatTimestamp = (timestamp) => {
 	}
 };
 
-const truncateMessage = (message, maxLength = 30) => {
+const formatMessageTime = (timestamp) => {
+	const date = new Date(timestamp);
+	return date.toLocaleTimeString([], {
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+	});
+};
+
+const truncateMessage = (message, maxLength = 35) => {
 	if (!message) return '';
 	return message.length > maxLength
 		? message.substring(0, maxLength) + '...'
 		: message;
+};
+
+const MessageStatusIcon = ({ status, isOutgoing, error }) => {
+	if (!isOutgoing) return null;
+
+	switch (status) {
+		case 'sending':
+			return (
+				<AccessTimeIcon sx={{ fontSize: 16, color: '#8696a0', ml: 0.5 }} />
+			);
+		case 'sent':
+			return <CheckIcon sx={{ fontSize: 16, color: '#8696a0', ml: 0.5 }} />;
+		case 'delivered':
+			return <DoneAllIcon sx={{ fontSize: 16, color: '#8696a0', ml: 0.5 }} />;
+		case 'read':
+			return <DoneAllIcon sx={{ fontSize: 16, color: '#53bdeb', ml: 0.5 }} />;
+		case 'failed':
+			return (
+				<AccessTimeIcon sx={{ fontSize: 16, color: '#f15c6d', ml: 0.5 }} />
+			);
+		default:
+			return (
+				<AccessTimeIcon sx={{ fontSize: 16, color: '#8696a0', ml: 0.5 }} />
+			);
+	}
 };
 
 const Chat = () => {
@@ -81,9 +161,12 @@ const Chat = () => {
 	const [messages, setMessages] = useState([]);
 	const [isLogoutDialogOpen, setIsLogoutDialogOpen] = useState(false);
 	const [currentUserProfile, setCurrentUserProfile] = useState(null);
-	const [isLoading, setIsLoading] = useState(true);
+	const [isInitialLoading, setIsInitialLoading] = useState(true);
+	const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+	const [isSendingMessage, setIsSendingMessage] = useState(false);
 	const [selectedChat, setSelectedChat] = useState(null);
 	const [users, setUsers] = useState([]);
+	const [groups, setGroups] = useState([]);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [error, setError] = useState(null);
 	const [isTyping, setIsTyping] = useState(false);
@@ -92,9 +175,20 @@ const Chat = () => {
 	const [anchorEl, setAnchorEl] = useState(null);
 	const [unreadMessages, setUnreadMessages] = useState({});
 
+	// Group functionality states
+	const [activeTab, setActiveTab] = useState(0); // 0 for chats, 1 for groups
+	const [isCreateGroupDialogOpen, setIsCreateGroupDialogOpen] = useState(false);
+	const [isGroupInfoDialogOpen, setIsGroupInfoDialogOpen] = useState(false);
+	const [isAddMembersDialogOpen, setIsAddMembersDialogOpen] = useState(false);
+	const [groupName, setGroupName] = useState('');
+	const [groupDescription, setGroupDescription] = useState('');
+	const [selectedMembers, setSelectedMembers] = useState([]);
+	const [selectedGroup, setSelectedGroup] = useState(null);
+
 	const messagesEndRef = useRef(null);
 	const messageInputRef = useRef(null);
 	const typingTimeoutRef = useRef(null);
+	const hasFetchedDataRef = useRef(false);
 	const navigate = useNavigate();
 	const { auth } = useFirebase();
 
@@ -104,20 +198,26 @@ const Chat = () => {
 			user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
+	const filteredGroups = groups.filter(
+		(group) =>
+			group.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			group.description?.toLowerCase().includes(searchQuery.toLowerCase())
+	);
+
 	// Fetch current user profile
 	const fetchCurrentUserProfile = async () => {
 		if (!auth.currentUser) return;
 
 		try {
 			const response = await fetch(
-				`https://cinnova-chat-api.deliveredoncloud.com/api/users/${auth.currentUser.uid}`,
+				`http://localhost:3000/api/users/${auth.currentUser.uid}`,
 				{
 					headers: {
 						'ngrok-skip-browser-warning': 'true',
 					},
 				}
 			);
-			
+
 			if (response.ok) {
 				const data = await response.json();
 				setCurrentUserProfile(data.data);
@@ -136,13 +236,13 @@ const Chat = () => {
 			}
 
 			try {
-				setIsLoading(true);
+				setIsInitialLoading(true);
 				setError(null);
 				console.log('Current user:', auth.currentUser.uid);
 
 				// Try to fetch users with chat history first
 				let response = await fetch(
-					`https://cinnova-chat-api.deliveredoncloud.com/api/chat/users/${auth.currentUser.uid}`,
+					`http://localhost:3000/api/chat/users/${auth.currentUser.uid}`,
 					{
 						headers: {
 							'ngrok-skip-browser-warning': 'true',
@@ -195,14 +295,11 @@ const Chat = () => {
 					console.log(
 						'No users with chat history found, fetching all users...'
 					);
-					response = await fetch(
-						'https://cinnova-chat-api.deliveredoncloud.com/api/users',
-						{
-							headers: {
-								'ngrok-skip-browser-warning': 'true',
-							},
-						}
-					);
+					response = await fetch('http://localhost:3000/api/users', {
+						headers: {
+							'ngrok-skip-browser-warning': 'true',
+						},
+					});
 					data = await response.json();
 					console.log('All users response:', data);
 
@@ -242,7 +339,7 @@ const Chat = () => {
 				console.error('Error fetching users:', error);
 				setError(error.message);
 			} finally {
-				setIsLoading(false);
+				setIsInitialLoading(false);
 			}
 		};
 
@@ -305,7 +402,7 @@ const Chat = () => {
 							...user,
 							lastMessage: {
 								text: newMessage.message,
-								timestamp: newMessage.created_at,
+								timestamp: newMessage.createdAt,
 								isOutgoing: newMessage.sender_id === auth.currentUser.uid,
 							},
 						};
@@ -351,7 +448,7 @@ const Chat = () => {
 					senderName: newMessage.sender
 						? `${newMessage.sender.first_name} ${newMessage.sender.last_name}`
 						: 'Unknown',
-					timestamp: newMessage.created_at,
+					timestamp: newMessage.createdAt,
 					status: newMessage.status,
 					message_type: newMessage.message_type,
 				};
@@ -476,31 +573,6 @@ const Chat = () => {
 		}
 	}, [selectedChat, auth.currentUser]);
 
-	const fetchMessages = async () => {
-		if (!selectedChat) return;
-
-		try {
-			const roomName = generateRoomName(
-				auth.currentUser.uid,
-				selectedChat.firebase_uid
-			);
-			const response = await fetch(
-				`https://cinnova-chat-api.deliveredoncloud.com/api/messages/${roomName}`,
-				{
-					headers: {
-						'ngrok-skip-browser-warning': 'true',
-					},
-				}
-			);
-			if (!response.ok) throw new Error('Failed to fetch messages');
-			const data = await response.json();
-			setMessages(data);
-			scrollToBottom();
-		} catch (error) {
-			console.error('Error fetching messages:', error);
-		}
-	};
-
 	const generateRoomName = (userId1, userId2) => {
 		return [userId1, userId2].sort().join('-');
 	};
@@ -538,27 +610,67 @@ const Chat = () => {
 	};
 
 	const handleSendMessage = async () => {
-		if (!message.trim() || !selectedChat) return;
+		if (!message.trim() || (!selectedChat && !selectedGroup)) return;
 
-		const messageData = {
-			text: message.trim(),
+		// Route to appropriate send function
+		if (selectedGroup) {
+			return handleSendGroupMessage();
+		}
+
+		const messageText = message.trim();
+		setMessage('');
+		setIsSendingMessage(true);
+
+		// Optimistic UI update for individual messages
+		const tempId = `temp_${Date.now()}`;
+		const optimisticMessage = {
+			id: tempId,
+			text: messageText,
 			senderId: auth.currentUser.uid,
 			receiverId: selectedChat.firebase_uid,
+			senderName: currentUserProfile
+				? `${currentUserProfile.first_name} ${currentUserProfile.last_name}`
+				: 'You',
+			timestamp: new Date().toISOString(),
+			status: 'sending',
+			isOptimistic: true,
 		};
 
-		// Clear the input immediately
-		setMessage('');
-		messageInputRef.current?.focus();
+		setMessages((prev) => [...prev, optimisticMessage]);
+		setTimeout(scrollToBottom, 100);
 
 		try {
-			await sendMessage(messageData);
-			console.log('Message sent successfully via socket');
-			// The message will appear via the receive_message socket event
-			// Scroll to bottom after sending
-			setTimeout(scrollToBottom, 100);
+			// Use the correct POST /api/messages endpoint for individual messages
+			const response = await fetch('http://localhost:3000/api/messages', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'ngrok-skip-browser-warning': 'true',
+				},
+				body: JSON.stringify({
+					message: messageText,
+					sender_id: auth.currentUser.uid,
+					receiver_id: selectedChat.firebase_uid,
+					message_type: 'direct',
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to send message');
+			}
+
+			console.log('Message sent successfully');
 		} catch (error) {
 			console.error('Error sending message:', error);
-			// Could show an error toast here
+			// Update message status to failed
+			setMessages((prev) =>
+				prev.map((msg) =>
+					msg.id === tempId ? { ...msg, status: 'failed' } : msg
+				)
+			);
+		} finally {
+			setIsSendingMessage(false);
 		}
 	};
 
@@ -589,351 +701,1243 @@ const Chat = () => {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 	};
 
+	// GROUP FUNCTIONALITY FUNCTIONS
+	const fetchGroups = async () => {
+		if (!auth.currentUser) return;
+
+		try {
+			const response = await fetch(
+				`http://localhost:3000/api/groups/user/${auth.currentUser.uid}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+
+			if (response.ok) {
+				const data = await response.json();
+				setGroups(data.data || []);
+				console.log('User groups:', data.data);
+
+				// Join all group rooms for real-time updates
+				const socket = connectSocket(auth.currentUser.uid);
+				if (socket) {
+					data.data?.forEach((group) => {
+						console.log(`Joining group room: ${group.id}`);
+						joinGroup(group.id);
+					});
+				}
+			}
+		} catch (error) {
+			console.error('Error fetching groups:', error);
+		}
+	};
+
+	const handleCreateGroup = async () => {
+		if (!groupName.trim() || selectedMembers.length === 0) {
+			setError('Group name and at least one member are required');
+			return;
+		}
+
+		try {
+			setIsSendingMessage(true);
+			const memberIds = selectedMembers.map((member) => member.firebase_uid);
+
+			// Use the correct POST /api/groups endpoint
+			const response = await fetch('http://localhost:3000/api/groups', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'ngrok-skip-browser-warning': 'true',
+				},
+				body: JSON.stringify({
+					name: groupName.trim(),
+					description: groupDescription.trim(),
+					creator_id: auth.currentUser.uid,
+					member_ids: [...memberIds, auth.currentUser.uid], // Include creator
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to create group');
+			}
+
+			const data = await response.json();
+			console.log('Group created:', data);
+
+			// Reset form and close dialog
+			setGroupName('');
+			setGroupDescription('');
+			setSelectedMembers([]);
+			setIsCreateGroupDialogOpen(false);
+
+			// Refresh groups
+			await fetchGroups();
+		} catch (error) {
+			console.error('Error creating group:', error);
+			setError(error.message || 'Failed to create group');
+		} finally {
+			setIsSendingMessage(false);
+		}
+	};
+
+	const handleSelectChat = (chat) => {
+		setSelectedChat(chat);
+		setSelectedGroup(null);
+		setMessages([]);
+		setIsLoadingMessages(true);
+
+		// Clear unread messages for this chat
+		if (unreadMessages[chat.firebase_uid]) {
+			setUnreadMessages((prev) => ({
+				...prev,
+				[chat.firebase_uid]: 0,
+			}));
+		}
+
+		// Join the room for this conversation
+		const socket = connectSocket(auth.currentUser.uid);
+		if (socket) {
+			const roomName = generateRoomName(
+				auth.currentUser.uid,
+				chat.firebase_uid
+			);
+			joinRoom(roomName);
+		}
+
+		// Fetch messages for this chat
+		fetchMessages(chat.firebase_uid);
+	};
+
+	const fetchMessages = async (userId) => {
+		try {
+			setIsLoadingMessages(true);
+			// Use the correct GET /api/messages/:roomName endpoint for direct messages
+			const roomName = generateRoomName(auth.currentUser.uid, userId);
+			const response = await fetch(
+				`http://localhost:3000/api/messages/${roomName}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+
+			if (response) {
+				const data = await response.json();
+				const formattedMessages = data.map((msg) => ({
+					id: msg.id,
+					text: msg.message,
+					senderId: msg.sender_id,
+					receiverId: msg.receiver_id,
+					senderName: msg.sender
+						? `${msg.sender.first_name} ${msg.sender.last_name}`
+						: 'Unknown',
+					timestamp: msg.created_at,
+					status: msg.status,
+					message_type: msg.message_type,
+				}));
+				setMessages(formattedMessages);
+				setTimeout(scrollToBottom, 100);
+			}
+		} catch (error) {
+			console.error('Error fetching messages:', error);
+		} finally {
+			setIsLoadingMessages(false);
+		}
+	};
+
+	const handleSelectGroup = (group) => {
+		setSelectedGroup(group);
+		setSelectedChat(null);
+		setMessages([]);
+		setIsLoadingMessages(true);
+
+		// Clear unread messages for this group
+		if (unreadMessages[`group_${group.id}`]) {
+			setUnreadMessages((prev) => ({
+				...prev,
+				[`group_${group.id}`]: 0,
+			}));
+		}
+
+		// Join the group room
+		const socket = connectSocket(auth.currentUser.uid);
+		if (socket) {
+			joinGroup(group.id);
+		}
+
+		// Fetch group messages
+		fetchGroupMessages(group.id);
+	};
+
+	const fetchGroupMessages = async (groupId) => {
+		try {
+			setIsLoadingMessages(true);
+			// Use the correct GET /api/groups/:groupId/messages endpoint
+			const response = await fetch(
+				`http://localhost:3000/api/groups/${groupId}/messages`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+
+			if (response.ok) {
+				const data = await response.json();
+				const formattedMessages = data.data.map((msg) => ({
+					id: msg.id,
+					text: msg.message,
+					senderId: msg.sender_id,
+					senderName: msg.sender
+						? `${msg.sender.first_name} ${msg.sender.last_name}`
+						: 'Unknown',
+					timestamp: msg.created_at,
+					status: msg.status,
+					isGroup: true,
+					groupId: groupId,
+				}));
+				setMessages(formattedMessages);
+				setTimeout(scrollToBottom, 100);
+			}
+		} catch (error) {
+			console.error('Error fetching group messages:', error);
+		} finally {
+			setIsLoadingMessages(false);
+		}
+	};
+
+	const handleSendGroupMessage = async () => {
+		if (!message.trim() || !selectedGroup) return;
+
+		const messageText = message.trim();
+		setMessage('');
+		setIsSendingMessage(true);
+
+		// Optimistic UI update
+		const tempId = `temp_${Date.now()}`;
+		const optimisticMessage = {
+			id: tempId,
+			text: messageText,
+			senderId: auth.currentUser.uid,
+			senderName: currentUserProfile
+				? `${currentUserProfile.first_name} ${currentUserProfile.last_name}`
+				: 'You',
+			timestamp: new Date().toISOString(),
+			status: 'sending',
+			isOptimistic: true,
+			isGroup: true,
+			groupId: selectedGroup.id,
+		};
+
+		setMessages((prev) => [...prev, optimisticMessage]);
+		setTimeout(scrollToBottom, 100);
+
+		try {
+			// Use the correct POST /api/messages endpoint for group messages
+			const response = await fetch('http://localhost:3000/api/messages', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'ngrok-skip-browser-warning': 'true',
+				},
+				body: JSON.stringify({
+					message: messageText,
+					sender_id: auth.currentUser.uid,
+					group_id: selectedGroup.id,
+					message_type: 'group',
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to send message');
+			}
+
+			console.log('Group message sent successfully');
+		} catch (error) {
+			console.error('Error sending group message:', error);
+			// Update message status to failed
+			setMessages((prev) =>
+				prev.map((msg) =>
+					msg.id === tempId ? { ...msg, status: 'failed' } : msg
+				)
+			);
+		} finally {
+			setIsSendingMessage(false);
+		}
+	};
+
+	const handleAddMembers = async () => {
+		if (!selectedGroup || selectedMembers.length === 0) return;
+
+		try {
+			setIsSendingMessage(true);
+			const memberIds = selectedMembers.map((member) => member.firebase_uid);
+
+			// Use the correct POST /api/groups/add-member endpoint
+			const response = await fetch(
+				'http://localhost:3000/api/groups/add-member',
+				{
+					method: 'POST',
+					headers: {
+						'Content-Type': 'application/json',
+						'ngrok-skip-browser-warning': 'true',
+					},
+					body: JSON.stringify({
+						group_id: selectedGroup.id,
+						member_ids: memberIds,
+						admin_id: auth.currentUser.uid, // For admin verification
+					}),
+				}
+			);
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to add members');
+			}
+
+			// Reset selection and close dialog
+			setSelectedMembers([]);
+			setIsAddMembersDialogOpen(false);
+
+			// Refresh group info
+			await fetchGroups();
+		} catch (error) {
+			console.error('Error adding members:', error);
+			setError(error.message || 'Failed to add members');
+		} finally {
+			setIsSendingMessage(false);
+		}
+	};
+
+	const handleLeaveGroup = async (groupId) => {
+		try {
+			// Use the correct POST /api/groups/leave endpoint
+			const response = await fetch('http://localhost:3000/api/groups/leave', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'ngrok-skip-browser-warning': 'true',
+				},
+				body: JSON.stringify({
+					group_id: groupId,
+					user_id: auth.currentUser.uid,
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to leave group');
+			}
+
+			// If we're currently viewing this group, clear selection
+			if (selectedGroup?.id === groupId) {
+				setSelectedGroup(null);
+				setMessages([]);
+			}
+
+			// Refresh groups
+			await fetchGroups();
+		} catch (error) {
+			console.error('Error leaving group:', error);
+			setError(error.message || 'Failed to leave group');
+		}
+	};
+
+	const handleJoinGroup = async (groupId) => {
+		try {
+			// Use the correct POST /api/groups/join endpoint
+			const response = await fetch('http://localhost:3000/api/groups/join', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'ngrok-skip-browser-warning': 'true',
+				},
+				body: JSON.stringify({
+					group_id: groupId,
+					user_id: auth.currentUser.uid,
+				}),
+			});
+
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.message || 'Failed to join group');
+			}
+
+			// Refresh groups
+			await fetchGroups();
+		} catch (error) {
+			console.error('Error joining group:', error);
+			setError(error.message || 'Failed to join group');
+		}
+	};
+
+	// Load groups on component mount
+	useEffect(() => {
+		if (auth.currentUser && !hasFetchedDataRef.current) {
+			fetchGroups();
+		}
+	}, [auth.currentUser]);
+
+	// Socket listeners for group events
+	useEffect(() => {
+		if (!auth.currentUser) return;
+
+		const socket = connectSocket(auth.currentUser.uid);
+		if (!socket) return;
+
+		// Group message listener
+		const handleReceiveGroupMessage = (newMessage) => {
+			console.log('Received group message:', newMessage);
+
+			// Update messages if we're viewing this group
+			if (selectedGroup && newMessage.group_id === selectedGroup.id) {
+				const formattedMessage = {
+					id: newMessage.id,
+					text: newMessage.message,
+					senderId: newMessage.sender_id,
+					senderName: newMessage.sender
+						? `${newMessage.sender.first_name} ${newMessage.sender.last_name}`
+						: 'Unknown',
+					timestamp: newMessage.created_at,
+					status: newMessage.status,
+					isGroup: true,
+					groupId: newMessage.group_id,
+				};
+
+				setMessages((prev) => {
+					// Remove optimistic message if exists
+					const withoutOptimistic = prev.filter(
+						(msg) =>
+							!(
+								msg.isOptimistic &&
+								msg.text === formattedMessage.text &&
+								msg.senderId === formattedMessage.senderId
+							)
+					);
+					return [...withoutOptimistic, formattedMessage];
+				});
+
+				setTimeout(scrollToBottom, 100);
+			} else {
+				// Update unread count for other groups
+				if (newMessage.sender_id !== auth.currentUser.uid) {
+					setUnreadMessages((prev) => ({
+						...prev,
+						[`group_${newMessage.group_id}`]:
+							(prev[`group_${newMessage.group_id}`] || 0) + 1,
+					}));
+				}
+			}
+
+			// Update groups list with latest message
+			setGroups((prev) =>
+				prev.map((group) =>
+					group.id === newMessage.group_id
+						? {
+								...group,
+								lastMessage: {
+									text: newMessage.message,
+									timestamp: newMessage.created_at,
+									senderName: newMessage.sender
+										? `${newMessage.sender.first_name} ${newMessage.sender.last_name}`
+										: 'Unknown',
+									isOutgoing: newMessage.sender_id === auth.currentUser.uid,
+								},
+						  }
+						: group
+				)
+			);
+		};
+
+		// Group created/updated listeners
+		const handleGroupCreated = (groupData) => {
+			console.log('Group created:', groupData);
+			fetchGroups(); // Refresh groups list
+		};
+
+		const handleGroupUpdated = (groupData) => {
+			console.log('Group updated:', groupData);
+			fetchGroups(); // Refresh groups list
+		};
+
+		const handleMemberAdded = (data) => {
+			console.log('Member added to group:', data);
+			fetchGroups(); // Refresh groups list
+		};
+
+		const handleMemberRemoved = (data) => {
+			console.log('Member removed from group:', data);
+			fetchGroups(); // Refresh groups list
+		};
+
+		// Set up listeners
+		socket.on('receive_group_message', handleReceiveGroupMessage);
+		socket.on('group_created', handleGroupCreated);
+		socket.on('group_updated', handleGroupUpdated);
+		socket.on('member_added', handleMemberAdded);
+		socket.on('member_removed', handleMemberRemoved);
+
+		// Cleanup
+		return () => {
+			socket.off('receive_group_message', handleReceiveGroupMessage);
+			socket.off('group_created', handleGroupCreated);
+			socket.off('group_updated', handleGroupUpdated);
+			socket.off('member_added', handleMemberAdded);
+			socket.off('member_removed', handleMemberRemoved);
+		};
+	}, [auth.currentUser, selectedGroup]);
+
 	return (
-		<Box sx={{ display: 'flex', height: '100vh' }}>
-			{/* Sidebar */}
-			<Drawer
-				variant="permanent"
+		<Box
+			sx={{
+				display: 'flex',
+				height: '100vh',
+				bgcolor: WHATSAPP_COLORS.background,
+				// Global scrollbar styling for the entire chat component
+				'& *::-webkit-scrollbar': {
+					width: '6px',
+					height: '6px',
+				},
+				'& *::-webkit-scrollbar-track': {
+					background: WHATSAPP_COLORS.surface,
+				},
+				'& *::-webkit-scrollbar-thumb': {
+					background: WHATSAPP_COLORS.surfaceVariant,
+					borderRadius: '3px',
+					'&:hover': {
+						background: '#3e4a56',
+					},
+				},
+				'& *::-webkit-scrollbar-corner': {
+					background: WHATSAPP_COLORS.surface,
+				},
+			}}
+		>
+			{/* WhatsApp-style Sidebar */}
+			<Box
 				sx={{
 					width: DRAWER_WIDTH,
-					flexShrink: 0,
-					'& .MuiDrawer-paper': {
-						width: DRAWER_WIDTH,
-						boxSizing: 'border-box',
-					},
+					borderRight: `1px solid ${WHATSAPP_COLORS.divider}`,
+					bgcolor: WHATSAPP_COLORS.surface,
+					display: 'flex',
+					flexDirection: 'column',
 				}}
 			>
-				<Toolbar />
-				<Box sx={{ overflow: 'auto' }}>
+				{/* Sidebar Header */}
+				<Box
+					sx={{
+						p: 2,
+						borderBottom: `1px solid ${WHATSAPP_COLORS.divider}`,
+						bgcolor: WHATSAPP_COLORS.surface,
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'space-between',
+					}}
+				>
+					<Box sx={{ display: 'flex', alignItems: 'center' }}>
+						<Avatar
+							sx={{
+								bgcolor: WHATSAPP_COLORS.primary,
+								width: 40,
+								height: 40,
+								mr: 2,
+							}}
+						>
+							{currentUserProfile
+								? `${currentUserProfile.first_name?.[0]?.toUpperCase() || ''}${
+										currentUserProfile.last_name?.[0]?.toUpperCase() || ''
+								  }`
+								: auth.currentUser?.email?.[0]?.toUpperCase() || 'U'}
+						</Avatar>
+						<Typography
+							variant="h6"
+							sx={{ color: WHATSAPP_COLORS.onSurface, fontWeight: 500 }}
+						>
+							Cinnova Chat
+						</Typography>
+					</Box>
+					<IconButton
+						onClick={handleUserMenuClick}
+						sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+					>
+						<MoreVertIcon />
+					</IconButton>
+				</Box>
+
+				{/* Tabs for Chats and Groups */}
+				<Box sx={{ borderBottom: `1px solid ${WHATSAPP_COLORS.divider}` }}>
+					<Tabs
+						value={activeTab}
+						onChange={(e, newValue) => setActiveTab(newValue)}
+						sx={{
+							'& .MuiTabs-indicator': {
+								backgroundColor: WHATSAPP_COLORS.primary,
+							},
+							'& .MuiTab-root': {
+								color: WHATSAPP_COLORS.onSurfaceVariant,
+								'&.Mui-selected': {
+									color: WHATSAPP_COLORS.primary,
+								},
+							},
+						}}
+					>
+						<Tab label="Chats" />
+						<Tab label="Groups" />
+					</Tabs>
+				</Box>
+
+				{/* Search Bar */}
+				<Box sx={{ p: 2 }}>
 					<TextField
 						fullWidth
-						placeholder="Search users..."
+						placeholder={activeTab === 0 ? 'Search chats' : 'Search groups'}
 						value={searchQuery}
 						onChange={(e) => setSearchQuery(e.target.value)}
 						variant="outlined"
-						sx={{ 
-							p: 2,
+						size="small"
+						sx={{
 							'& .MuiOutlinedInput-root': {
-								borderRadius: 4,
-								backgroundColor: '#f8f9fa',
-								transition: 'all 0.2s ease-in-out',
-								'&:hover': {
-									backgroundColor: '#e9ecef',
-									transform: 'translateY(-1px)',
-									boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+								bgcolor: WHATSAPP_COLORS.background,
+								borderRadius: '8px',
+								border: 'none',
+								'& fieldset': {
+									border: 'none',
 								},
-								'&.Mui-focused': {
-									backgroundColor: '#fff',
-									transform: 'translateY(-2px)',
-									boxShadow: '0 8px 25px rgba(25, 118, 210, 0.15)',
-									'& .MuiOutlinedInput-notchedOutline': {
-										borderColor: 'primary.main',
-										borderWidth: 2,
-									},
+								'&:hover fieldset': {
+									border: 'none',
 								},
-								'& .MuiOutlinedInput-notchedOutline': {
-									borderColor: 'transparent',
-									transition: 'all 0.2s ease-in-out',
+								'&.Mui-focused fieldset': {
+									border: `1px solid ${WHATSAPP_COLORS.primary}`,
 								},
 							},
 							'& .MuiInputBase-input': {
-								fontSize: '0.95rem',
-								fontWeight: 500,
+								color: WHATSAPP_COLORS.onSurface,
+								fontSize: '15px',
+								'&::placeholder': {
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									opacity: 1,
+								},
 							},
 						}}
 						InputProps={{
 							startAdornment: (
 								<InputAdornment position="start">
-									<SearchIcon sx={{ 
-										color: 'text.secondary',
-										fontSize: '1.2rem',
-										transition: 'color 0.2s ease-in-out',
-									}} />
+									<SearchIcon
+										sx={{
+											color: WHATSAPP_COLORS.onSurfaceVariant,
+											fontSize: 20,
+										}}
+									/>
 								</InputAdornment>
 							),
 						}}
 					/>
+				</Box>
+
+				{/* Create Group Button (only show on Groups tab) */}
+				{activeTab === 1 && (
+					<Box
+						sx={{ p: 2, borderBottom: `1px solid ${WHATSAPP_COLORS.divider}` }}
+					>
+						<Button
+							fullWidth
+							startIcon={<GroupAddIcon />}
+							onClick={() => setIsCreateGroupDialogOpen(true)}
+							sx={{
+								bgcolor: WHATSAPP_COLORS.primary,
+								color: 'white',
+								'&:hover': {
+									bgcolor: WHATSAPP_COLORS.primaryDark,
+								},
+								borderRadius: 2,
+								textTransform: 'none',
+								py: 1,
+							}}
+						>
+							Create New Group
+						</Button>
+					</Box>
+				)}
+
+				{/* Chats/Groups List */}
+				<Box
+					sx={{
+						flexGrow: 1,
+						overflow: 'auto',
+						'&::-webkit-scrollbar': {
+							width: '6px',
+						},
+						'&::-webkit-scrollbar-track': {
+							background: WHATSAPP_COLORS.surface,
+						},
+						'&::-webkit-scrollbar-thumb': {
+							background: WHATSAPP_COLORS.surfaceVariant,
+							borderRadius: '3px',
+							'&:hover': {
+								background: '#3e4a56',
+							},
+						},
+					}}
+				>
 					{error && (
-						<Alert severity="error" sx={{ mx: 2, mb: 2 }}>
+						<Alert severity="error" sx={{ mx: 2, my: 1 }}>
 							{error}
 						</Alert>
 					)}
-					{isLoading ? (
+					{isInitialLoading ? (
 						<Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-							<CircularProgress />
+							<CircularProgress sx={{ color: WHATSAPP_COLORS.primary }} />
 						</Box>
-					) : users.length === 0 ? (
-						<Box sx={{ p: 2, textAlign: 'center' }}>
-							<Typography color="textSecondary">No users found</Typography>
-						</Box>
-					) : (
-						<List>
-							{filteredUsers.map((user) => (
-								<React.Fragment key={user.firebase_uid}>
+					) : activeTab === 0 ? (
+						// Individual Chats Tab
+						users.length === 0 ? (
+							<Box sx={{ p: 3, textAlign: 'center' }}>
+								<Typography sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+									No conversations
+								</Typography>
+							</Box>
+						) : (
+							<List sx={{ p: 0 }}>
+								{filteredUsers.map((user) => (
 									<ListItem
+										key={user.firebase_uid}
 										button
 										selected={selectedChat?.firebase_uid === user.firebase_uid}
 										onClick={() => setSelectedChat(user)}
 										sx={{
-											backgroundColor:
-												unreadMessages[user.firebase_uid] > 0 &&
-												selectedChat?.firebase_uid !== user.firebase_uid
-													? 'rgba(25, 118, 210, 0.08)'
-													: 'inherit',
+											px: 2,
+											py: 1.5,
+											bgcolor:
+												selectedChat?.firebase_uid === user.firebase_uid
+													? WHATSAPP_COLORS.surfaceVariant
+													: 'transparent',
 											'&:hover': {
-												backgroundColor:
-													unreadMessages[user.firebase_uid] > 0 &&
-													selectedChat?.firebase_uid !== user.firebase_uid
-														? 'rgba(25, 118, 210, 0.12)'
-														: 'rgba(0, 0, 0, 0.04)',
+												bgcolor: WHATSAPP_COLORS.surfaceVariant,
 											},
 										}}
 									>
 										<ListItemAvatar>
-											<Avatar>
-												{user.first_name?.[0]?.toUpperCase()}
-												{user.last_name?.[0]?.toUpperCase()}
-											</Avatar>
+											<Box sx={{ position: 'relative' }}>
+												<Avatar
+													sx={{
+														bgcolor: WHATSAPP_COLORS.primary,
+														width: 50,
+														height: 50,
+														fontSize: '18px',
+														fontWeight: 500,
+													}}
+												>
+													{user.first_name?.[0]?.toUpperCase()}
+													{user.last_name?.[0]?.toUpperCase()}
+												</Avatar>
+											</Box>
 										</ListItemAvatar>
 										<ListItemText
 											primary={
-												<Typography
+												<Box
 													sx={{
-														fontWeight:
-															unreadMessages[user.firebase_uid] > 0 &&
-															selectedChat?.firebase_uid !== user.firebase_uid
-																? 'bold'
-																: 'normal',
+														display: 'flex',
+														justifyContent: 'space-between',
+														alignItems: 'center',
+														mb: 0.5,
 													}}
 												>
-													{`${user.first_name || ''} ${user.last_name || ''}`}
-												</Typography>
-											}
-											secondary={
-												<Box
-													component="span"
-													sx={{ display: 'flex', flexDirection: 'column' }}
-												>
 													<Typography
-														component="span"
-														variant="body2"
-														color="text.primary"
 														sx={{
-															display: 'flex',
-															alignItems: 'center',
-															gap: 0.5,
-															color: user.lastMessage?.isOutgoing
-																? 'text.secondary'
-																: 'inherit',
+															color: WHATSAPP_COLORS.onSurface,
+															fontWeight: 500,
+															fontSize: '17px',
 														}}
 													>
-														{user.lastMessage?.isOutgoing && (
-															<SendIcon sx={{ fontSize: 12 }} />
-														)}
-														{user.lastMessage
-															? truncateMessage(user.lastMessage.text)
-															: 'No messages yet'}
+														{`${user.first_name || ''} ${user.last_name || ''}`}
 													</Typography>
 													{user.lastMessage && (
 														<Typography
-															component="span"
-															variant="caption"
-															color="text.secondary"
+															sx={{
+																color: WHATSAPP_COLORS.onSurfaceVariant,
+																fontSize: '12px',
+															}}
 														>
 															{formatTimestamp(user.lastMessage.timestamp)}
 														</Typography>
 													)}
 												</Box>
 											}
-										/>
-										{unreadMessages[user.firebase_uid] > 0 &&
-											selectedChat?.firebase_uid !== user.firebase_uid && (
-												<Badge
-													badgeContent={unreadMessages[user.firebase_uid]}
-													color="error"
+											secondary={
+												<Box
 													sx={{
-														'& .MuiBadge-badge': {
-															right: -6,
-															top: 8,
-															minWidth: 20,
-															height: 20,
-															fontSize: '0.75rem',
-															fontWeight: 'bold',
-														},
+														display: 'flex',
+														justifyContent: 'space-between',
+														alignItems: 'center',
 													}}
 												>
-													<Box
+													<Typography
 														sx={{
-															width: 8,
-															height: 8,
-															borderRadius: '50%',
-															backgroundColor: 'error.main',
+															color: WHATSAPP_COLORS.onSurfaceVariant,
+															fontSize: '14px',
+															display: 'flex',
+															alignItems: 'center',
+															gap: 0.5,
+														}}
+													>
+														{user.lastMessage?.isOutgoing && (
+															<DoneAllIcon
+																sx={{
+																	fontSize: 16,
+																	color: WHATSAPP_COLORS.onSurfaceVariant,
+																}}
+															/>
+														)}
+														{user.lastMessage
+															? truncateMessage(user.lastMessage.text)
+															: 'Click to start chatting'}
+													</Typography>
+													{unreadMessages[user.firebase_uid] > 0 &&
+														selectedChat?.firebase_uid !==
+															user.firebase_uid && (
+															<Chip
+																label={unreadMessages[user.firebase_uid]}
+																size="small"
+																sx={{
+																	bgcolor: WHATSAPP_COLORS.primary,
+																	color: '#fff',
+																	height: 20,
+																	fontSize: '12px',
+																	fontWeight: 600,
+																	minWidth: 20,
+																}}
+															/>
+														)}
+												</Box>
+											}
+										/>
+									</ListItem>
+								))}
+							</List>
+						)
+					) : // Groups Tab
+					groups.length === 0 ? (
+						<Box sx={{ p: 3, textAlign: 'center' }}>
+							<Typography sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+								No groups yet
+							</Typography>
+							<Typography
+								sx={{
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									fontSize: '14px',
+									mt: 1,
+								}}
+							>
+								Create a group to start chatting with multiple people
+							</Typography>
+						</Box>
+					) : (
+						<List sx={{ p: 0 }}>
+							{filteredGroups.map((group) => (
+								<ListItem
+									key={group.id}
+									button
+									selected={selectedGroup?.id === group.id}
+									onClick={() => handleSelectGroup(group)}
+									sx={{
+										px: 2,
+										py: 1.5,
+										bgcolor:
+											selectedGroup?.id === group.id
+												? WHATSAPP_COLORS.surfaceVariant
+												: 'transparent',
+										'&:hover': {
+											bgcolor: WHATSAPP_COLORS.surfaceVariant,
+										},
+									}}
+								>
+									<ListItemAvatar>
+										<Avatar
+											sx={{
+												bgcolor: WHATSAPP_COLORS.secondary,
+												width: 50,
+												height: 50,
+												fontSize: '18px',
+												fontWeight: 500,
+											}}
+										>
+											<GroupIcon />
+										</Avatar>
+									</ListItemAvatar>
+									<ListItemText
+										primary={
+											<Box
+												sx={{
+													display: 'flex',
+													justifyContent: 'space-between',
+													alignItems: 'center',
+													mb: 0.5,
+												}}
+											>
+												<Typography
+													sx={{
+														color: WHATSAPP_COLORS.onSurface,
+														fontWeight: 500,
+														fontSize: '16px',
+													}}
+												>
+													{group.name}
+												</Typography>
+												{group.lastMessage && (
+													<Typography
+														sx={{
+															color: WHATSAPP_COLORS.onSurfaceVariant,
+															fontSize: '12px',
+														}}
+													>
+														{formatTimestamp(group.lastMessage.timestamp)}
+													</Typography>
+												)}
+											</Box>
+										}
+										secondary={
+											<Box
+												sx={{
+													display: 'flex',
+													justifyContent: 'space-between',
+													alignItems: 'center',
+												}}
+											>
+												<Typography
+													sx={{
+														color: WHATSAPP_COLORS.onSurfaceVariant,
+														fontSize: '14px',
+													}}
+												>
+													{group.lastMessage
+														? `${
+																group.lastMessage.senderName
+														  }: ${truncateMessage(group.lastMessage.text)}`
+														: group.description || 'No messages yet'}
+												</Typography>
+												{unreadMessages[`group_${group.id}`] > 0 && (
+													<Chip
+														label={unreadMessages[`group_${group.id}`]}
+														size="small"
+														sx={{
+															bgcolor: WHATSAPP_COLORS.primary,
+															color: 'white',
+															height: '20px',
+															fontSize: '12px',
+															fontWeight: 'bold',
+															'& .MuiChip-label': {
+																px: 1,
+															},
 														}}
 													/>
-												</Badge>
-											)}
-									</ListItem>
-									<Divider variant="inset" component="li" />
-								</React.Fragment>
+												)}
+											</Box>
+										}
+									/>
+								</ListItem>
 							))}
 						</List>
 					)}
 				</Box>
-			</Drawer>
+			</Box>
 
 			{/* Main Chat Area */}
 			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-				<AppBar
-					position="fixed"
-					sx={{ zIndex: (theme) => theme.zIndex.drawer + 1 }}
-				>
-					<Toolbar>
-						<Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-							{selectedChat
-								? `Chat with ${selectedChat.first_name} ${selectedChat.last_name}`
-								: 'Select a chat'}
-						</Typography>
-						<IconButton color="inherit" onClick={handleUserMenuClick}>
-							<MoreVertIcon />
-						</IconButton>
-						<Menu
-							anchorEl={anchorEl}
-							open={Boolean(anchorEl)}
-							onClose={handleUserMenuClose}
-						>
-							<MenuItem
-								onClick={() => {
-									handleUserMenuClose();
-									setIsLogoutDialogOpen(true);
-								}}
-							>
-								<ExitToAppIcon sx={{ mr: 1 }} />
-								Logout
-							</MenuItem>
-						</Menu>
-					</Toolbar>
-				</AppBar>
-				<Toolbar />
-
-				{selectedChat ? (
+				{selectedChat || selectedGroup ? (
 					<>
-						{/* Chat Header */}
-						<Paper
-							elevation={1}
+						{/* WhatsApp-style Chat Header */}
+						<Box
 							sx={{
 								p: 2,
-								borderBottom: '1px solid #e0e0e0',
-								backgroundColor: '#fff',
+								borderBottom: `1px solid ${WHATSAPP_COLORS.divider}`,
+								bgcolor: WHATSAPP_COLORS.surface,
 								display: 'flex',
 								alignItems: 'center',
+								justifyContent: 'space-between',
 							}}
 						>
-							<Avatar sx={{ ml:3,mr: 1, bgcolor: 'primary.main' }}>
-								{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
-							</Avatar>
-							<Box>
-								<Typography variant="h6" sx={{ fontWeight: 'medium' }}>
-									{selectedChat.first_name} {selectedChat.last_name}
-								</Typography>
+							<Box sx={{ display: 'flex', alignItems: 'center' }}>
+								<Avatar
+									sx={{
+										bgcolor: selectedGroup
+											? WHATSAPP_COLORS.secondary
+											: WHATSAPP_COLORS.primary,
+										width: 40,
+										height: 40,
+										mr: 2,
+									}}
+								>
+									{selectedGroup ? (
+										<GroupIcon />
+									) : (
+										<>
+											{selectedChat.first_name?.[0]?.toUpperCase()}
+											{selectedChat.last_name?.[0]?.toUpperCase()}
+										</>
+									)}
+								</Avatar>
+								<Box>
+									<Typography
+										variant="h6"
+										sx={{
+											color: WHATSAPP_COLORS.onSurface,
+											fontWeight: 500,
+											fontSize: '16px',
+										}}
+									>
+										{selectedGroup
+											? selectedGroup.name
+											: `${selectedChat.first_name} ${selectedChat.last_name}`}
+									</Typography>
+									{selectedGroup && (
+										<Typography
+											sx={{
+												color: WHATSAPP_COLORS.onSurfaceVariant,
+												fontSize: '12px',
+											}}
+										>
+											{selectedGroup.members?.length || 0} members
+										</Typography>
+									)}
+									<Typography
+										sx={{
+											color: WHATSAPP_COLORS.onSurfaceVariant,
+											fontSize: '13px',
+										}}
+									>
+										last seen recently
+									</Typography>
+								</Box>
 							</Box>
-						</Paper>
+							<Box>
+								{!selectedGroup && (
+									<>
+										<IconButton
+											sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+										>
+											<VideoCallIcon />
+										</IconButton>
+										<IconButton
+											sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+										>
+											<PhoneIcon />
+										</IconButton>
+									</>
+								)}
+								<IconButton
+									onClick={() => setIsGroupInfoDialogOpen(true)}
+									sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+								>
+									<InfoIcon />
+								</IconButton>
+								<IconButton sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+									<MoreVertIcon />
+								</IconButton>
+							</Box>
+						</Box>
 
-						{/* Messages Area */}
+						{/* Messages Area with WhatsApp background */}
 						<Box
 							sx={{
 								flexGrow: 1,
 								overflow: 'auto',
 								p: 2,
-								backgroundColor: '#f5f5f5',
+								bgcolor: WHATSAPP_COLORS.background,
+								backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23${WHATSAPP_COLORS.surfaceVariant.slice(
+									1
+								)}' fill-opacity='0.05'%3E%3Cpath d='m36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+								display: 'flex',
+								flexDirection: 'column',
+								'&::-webkit-scrollbar': {
+									width: '6px',
+								},
+								'&::-webkit-scrollbar-track': {
+									background: 'transparent',
+								},
+								'&::-webkit-scrollbar-thumb': {
+									background: WHATSAPP_COLORS.surfaceVariant,
+									borderRadius: '3px',
+									'&:hover': {
+										background: '#3e4a56',
+									},
+								},
 							}}
 						>
-							<Container >
-								{messages.map((msg, index) => (
+							<Stack spacing={1}>
+								{messages.length === 0 ? (
 									<Box
-										key={msg.id || `temp-${msg.timestamp}-${index}`}
 										sx={{
 											display: 'flex',
-											justifyContent:
-												msg.senderId === auth.currentUser.uid
-													? 'flex-end'
-													: 'flex-start',
-											mb: 2,
+											flexDirection: 'column',
+											justifyContent: 'center',
+											alignItems: 'center',
+											height: '100%',
+											gap: 2,
 										}}
 									>
-										{msg.senderId !== auth.currentUser.uid && (
-											<Avatar sx={{ mr: 1, bgcolor: 'grey.400' }}>
-												{selectedChat.first_name?.[0]?.toUpperCase()}{selectedChat.last_name?.[0]?.toUpperCase()}
-											</Avatar>
-										)}
-										<Paper
-											elevation={2}
+										<Box
 											sx={{
-												p: 2,
-												maxWidth: '70%',
-												backgroundColor:
-													msg.senderId === auth.currentUser.uid
-														? '#1976d2'
-														: '#fff',
-												color:
-													msg.senderId === auth.currentUser.uid
-														? '#fff'
-														: '#000',
-												borderRadius: 2,
+												width: 80,
+												height: 80,
+												borderRadius: '50%',
+												bgcolor: WHATSAPP_COLORS.surface,
+												display: 'flex',
+												alignItems: 'center',
+												justifyContent: 'center',
+												border: `2px solid ${WHATSAPP_COLORS.surfaceVariant}`,
 											}}
 										>
-											<Typography variant="body1">{msg.text}</Typography>
-											<Typography
-												variant="caption"
+											<SendIcon
+												sx={{ fontSize: 40, color: WHATSAPP_COLORS.primary }}
+											/>
+										</Box>
+										<Typography
+											sx={{
+												color: WHATSAPP_COLORS.onSurfaceVariant,
+												fontSize: '16px',
+												fontWeight: 500,
+												textAlign: 'center',
+											}}
+										>
+											No messages here yet...
+										</Typography>
+										<Typography
+											sx={{
+												color: WHATSAPP_COLORS.onSurfaceVariant,
+												fontSize: '14px',
+												textAlign: 'center',
+												maxWidth: 250,
+												opacity: 0.7,
+											}}
+										>
+											Send a message to start the conversation
+											{selectedGroup
+												? ` in ${selectedGroup.name}`
+												: ` with ${selectedChat.first_name}`}
+										</Typography>
+									</Box>
+								) : (
+									messages.map((msg, index) => {
+										const isOutgoing = msg.senderId === auth.currentUser.uid;
+										const showAvatar =
+											index === 0 ||
+											messages[index - 1].senderId !== msg.senderId;
+										const isLastInGroup =
+											index === messages.length - 1 ||
+											messages[index + 1].senderId !== msg.senderId;
+
+										return (
+											<Box
+												key={msg.id || `temp-${msg.timestamp}-${index}`}
 												sx={{
-													display: 'block',
-													mt: 0.5,
-													color:
-														msg.senderId === auth.currentUser.uid
-															? 'rgba(255, 255, 255, 0.7)'
-															: 'rgba(0, 0, 0, 0.6)',
+													display: 'flex',
+													justifyContent: isOutgoing
+														? 'flex-end'
+														: 'flex-start',
+													mb: isLastInGroup ? 1 : 0.2,
 												}}
 											>
-												{new Date(msg.timestamp).toLocaleTimeString([], { 
-													hour: '2-digit', 
-													minute: '2-digit',
-													hour12: true 
-												})}
-											</Typography>
-										</Paper>
-										{msg.senderId === auth.currentUser.uid && (
-											<Avatar sx={{ ml: 1, bgcolor: 'primary.main' }}>
-												{currentUserProfile ? 
-													`${currentUserProfile.first_name?.[0]?.toUpperCase() || ''}${currentUserProfile.last_name?.[0]?.toUpperCase() || ''}` :
-													auth.currentUser?.email?.[0]?.toUpperCase() || 'U'
-												}
-											</Avatar>
-										)}
-									</Box>
-								))}
+												<Paper
+													elevation={1}
+													sx={{
+														px: 2,
+														py: 1,
+														maxWidth: '65%',
+														bgcolor: isOutgoing
+															? WHATSAPP_COLORS.outgoingMessage
+															: WHATSAPP_COLORS.incomingMessage,
+														color: WHATSAPP_COLORS.onSurface,
+														borderRadius: isOutgoing
+															? '7.5px 7.5px 7.5px 0px'
+															: '7.5px 7.5px 0px 7.5px',
+														position: 'relative',
+														wordBreak: 'break-word',
+														boxShadow: '0 1px 0.5px rgba(0,0,0,.13)',
+													}}
+												>
+													{/* Show sender name for group messages (incoming only) */}
+													{selectedGroup && !isOutgoing && showAvatar && (
+														<Typography
+															sx={{
+																fontSize: '12px',
+																fontWeight: 500,
+																color: WHATSAPP_COLORS.primary,
+																mb: 0.5,
+															}}
+														>
+															{msg.senderName}
+														</Typography>
+													)}
+													<Typography
+														variant="body1"
+														sx={{
+															fontSize: '14px',
+															lineHeight: 1.4,
+															color: WHATSAPP_COLORS.onSurface,
+															mb: 0.5,
+														}}
+													>
+														{msg.text}
+													</Typography>
+													<Box
+														sx={{
+															display: 'flex',
+															alignItems: 'center',
+															justifyContent: 'flex-end',
+															gap: 0.5,
+															minWidth: '60px',
+														}}
+													>
+														<Typography
+															variant="caption"
+															sx={{
+																color: WHATSAPP_COLORS.onSurfaceVariant,
+																fontSize: '11px',
+															}}
+														>
+															{formatMessageTime(msg.timestamp)}
+														</Typography>
+														<MessageStatusIcon
+															status={msg.status}
+															isOutgoing={isOutgoing}
+															error={msg.error}
+														/>
+													</Box>
+												</Paper>
+											</Box>
+										);
+									})
+								)}
 								<div ref={messagesEndRef} />
-							</Container>
+							</Stack>
 						</Box>
 
-						<Paper
-							component="form"
-							onSubmit={(e) => {
-								e.preventDefault();
-								handleSendMessage();
-							}}
+						{/* WhatsApp-style Message Input */}
+						<Box
 							sx={{
 								p: 2,
-								borderTop: '1px solid #e0e0e0',
+								borderTop: `1px solid ${WHATSAPP_COLORS.divider}`,
+								bgcolor: WHATSAPP_COLORS.surface,
 							}}
 						>
-							<Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-								<Tooltip title="Add emoji">
-									<IconButton
-										onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-										size="small"
-									>
-										<EmojiIcon />
-									</IconButton>
-								</Tooltip>
+							<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+								{/* Attachment Button */}
+								<IconButton
+									sx={{
+										color: WHATSAPP_COLORS.onSurfaceVariant,
+										'&:hover': {
+											bgcolor: WHATSAPP_COLORS.surfaceVariant,
+										},
+									}}
+								>
+									<AttachFileIcon />
+								</IconButton>
+
 								<Box sx={{ position: 'relative', flexGrow: 1 }}>
 									{showEmojiPicker && (
 										<Box
@@ -941,13 +1945,14 @@ const Chat = () => {
 												position: 'absolute',
 												bottom: '100%',
 												left: 0,
-												zIndex: 1,
+												zIndex: 1000,
 											}}
 										>
 											<EmojiPicker
 												onEmojiClick={handleEmojiClick}
-												width={300}
+												width={320}
 												height={400}
+												theme="dark"
 											/>
 										</Box>
 									)}
@@ -955,77 +1960,568 @@ const Chat = () => {
 										fullWidth
 										value={message}
 										onChange={handleMessageChange}
-										placeholder="Type a message..."
+										placeholder="Type a message"
 										variant="outlined"
-										size="small"
-										inputRef={messageInputRef}
 										multiline
 										maxRows={4}
+										inputRef={messageInputRef}
 										onKeyPress={(e) => {
 											if (e.key === 'Enter' && !e.shiftKey) {
 												e.preventDefault();
-												handleSendMessage(e);
+												handleSendMessage();
 											}
+										}}
+										sx={{
+											'& .MuiOutlinedInput-root': {
+												bgcolor: WHATSAPP_COLORS.background,
+												borderRadius: '21px',
+												border: 'none',
+												minHeight: '42px',
+												'& fieldset': {
+													border: 'none',
+												},
+												'&:hover fieldset': {
+													border: 'none',
+												},
+												'&.Mui-focused fieldset': {
+													border: 'none',
+												},
+												'&.Mui-focused': {
+													bgcolor: WHATSAPP_COLORS.background,
+												},
+											},
+											'& .MuiInputBase-input': {
+												color: WHATSAPP_COLORS.onSurface,
+												fontSize: '15px',
+												bgcolor: 'transparent',
+												'&::placeholder': {
+													color: WHATSAPP_COLORS.onSurfaceVariant,
+													opacity: 1,
+												},
+												'&:-webkit-autofill': {
+													WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.background} inset`,
+													WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+												},
+											},
+										}}
+										InputProps={{
+											startAdornment: (
+												<InputAdornment position="start">
+													<IconButton
+														onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+														size="small"
+														sx={{
+															color: WHATSAPP_COLORS.onSurfaceVariant,
+															'&:hover': {
+																color: WHATSAPP_COLORS.primary,
+															},
+														}}
+													>
+														<EmojiIcon />
+													</IconButton>
+												</InputAdornment>
+											),
+											endAdornment: message.trim() ? (
+												<InputAdornment position="end">
+													<IconButton
+														onClick={handleSendMessage}
+														sx={{
+															color: WHATSAPP_COLORS.primary,
+															'&:hover': {
+																bgcolor: alpha(WHATSAPP_COLORS.primary, 0.1),
+															},
+														}}
+													>
+														<SendIcon />
+													</IconButton>
+												</InputAdornment>
+											) : null,
 										}}
 									/>
 								</Box>
-								<IconButton
-								type="submit"
-								color="primary"
-								disabled={!message.trim()}
-								sx={{
-									color: 'primary.main',
-									'&:hover': {
-										color: 'primary.dark',
-										backgroundColor: 'transparent',
-									},
-									'&:disabled': {
-										color: 'grey.400',
-									},
-								}}
-							>
-								<SendIcon />
-							</IconButton>
 							</Box>
-						</Paper>
+						</Box>
 					</>
 				) : (
 					<Box
 						sx={{
 							display: 'flex',
+							flexDirection: 'column',
 							justifyContent: 'center',
 							alignItems: 'center',
 							height: '100%',
-							bgcolor: '#f5f5f5',
+							bgcolor: WHATSAPP_COLORS.background,
+							backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23${WHATSAPP_COLORS.surfaceVariant.slice(
+								1
+							)}' fill-opacity='0.05'%3E%3Cpath d='m36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
 						}}
 					>
-						<Typography variant="h6" color="textSecondary">
-							Select a chat to start messaging
+						<Box
+							sx={{
+								width: 320,
+								height: 320,
+								borderRadius: '50%',
+								bgcolor: WHATSAPP_COLORS.surface,
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								mb: 3,
+								border: `3px solid ${WHATSAPP_COLORS.surfaceVariant}`,
+							}}
+						>
+							<SendIcon
+								sx={{ fontSize: 120, color: WHATSAPP_COLORS.primary }}
+							/>
+						</Box>
+						<Typography
+							variant="h4"
+							sx={{ color: WHATSAPP_COLORS.onSurface, fontWeight: 300, mb: 1 }}
+						>
+							Cinnova Chat
+						</Typography>
+						<Typography
+							sx={{
+								color: WHATSAPP_COLORS.onSurfaceVariant,
+								textAlign: 'center',
+								maxWidth: 400,
+								lineHeight: 1.5,
+							}}
+						>
+							Send and receive messages without keeping your phone online.
+							<br />
+							Use Cinnova Chat on up to 4 linked devices and 1 phone at the same
+							time.
 						</Typography>
 					</Box>
 				)}
 			</Box>
 
+			{/* User Menu */}
+			<Menu
+				anchorEl={anchorEl}
+				open={Boolean(anchorEl)}
+				onClose={handleUserMenuClose}
+				PaperProps={{
+					sx: {
+						bgcolor: WHATSAPP_COLORS.surface,
+						color: WHATSAPP_COLORS.onSurface,
+						border: `1px solid ${WHATSAPP_COLORS.divider}`,
+					},
+				}}
+			>
+				<MenuItem
+					onClick={() => {
+						handleUserMenuClose();
+						setIsLogoutDialogOpen(true);
+					}}
+					sx={{ '&:hover': { bgcolor: WHATSAPP_COLORS.surfaceVariant } }}
+				>
+					<ExitToAppIcon sx={{ mr: 1 }} />
+					Log out
+				</MenuItem>
+			</Menu>
+
+			{/* Logout Dialog */}
 			<Dialog
 				open={isLogoutDialogOpen}
 				onClose={() => setIsLogoutDialogOpen(false)}
+				PaperProps={{
+					sx: {
+						bgcolor: WHATSAPP_COLORS.surface,
+						color: WHATSAPP_COLORS.onSurface,
+						border: `1px solid ${WHATSAPP_COLORS.divider}`,
+					},
+				}}
 			>
-				<DialogTitle>Confirm Logout</DialogTitle>
+				<DialogTitle sx={{ color: WHATSAPP_COLORS.onSurface }}>
+					Log out of Cinnova Chat?
+				</DialogTitle>
 				<DialogContent>
-					<Typography>
-						Are you sure you want to logout? You will need to sign in again to
-						continue chatting.
+					<Typography sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+						You'll need to scan the QR code again to log back in.
 					</Typography>
 				</DialogContent>
 				<DialogActions>
-					<Button onClick={() => setIsLogoutDialogOpen(false)}>Cancel</Button>
+					<Button
+						onClick={() => setIsLogoutDialogOpen(false)}
+						sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+					>
+						Cancel
+					</Button>
 					<Button
 						onClick={handleLogout}
-						color="primary"
 						variant="contained"
+						sx={{
+							bgcolor: WHATSAPP_COLORS.primary,
+							'&:hover': { bgcolor: WHATSAPP_COLORS.primaryDark },
+						}}
 						startIcon={<ExitToAppIcon />}
 					>
-						Logout
+						Log out
+					</Button>
+				</DialogActions>
+			</Dialog>
+
+			{/* Create Group Dialog */}
+			<Dialog
+				open={isCreateGroupDialogOpen}
+				onClose={() => setIsCreateGroupDialogOpen(false)}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						bgcolor: WHATSAPP_COLORS.surface,
+						color: WHATSAPP_COLORS.onSurface,
+						border: `1px solid ${WHATSAPP_COLORS.divider}`,
+					},
+				}}
+			>
+				<DialogTitle sx={{ color: WHATSAPP_COLORS.onSurface }}>
+					Create New Group
+				</DialogTitle>
+				<DialogContent>
+					<Stack spacing={3}>
+						<TextField
+							fullWidth
+							label="Group Name"
+							value={groupName}
+							onChange={(e) => setGroupName(e.target.value)}
+							variant="outlined"
+							sx={{
+								'& .MuiOutlinedInput-root': {
+									bgcolor: WHATSAPP_COLORS.background,
+									borderRadius: '8px',
+									'& fieldset': {
+										borderColor: WHATSAPP_COLORS.divider,
+									},
+									'&:hover fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+									'&.Mui-focused fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+								},
+								'& .MuiInputLabel-root': {
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									'&.Mui-focused': {
+										color: WHATSAPP_COLORS.primary,
+									},
+								},
+								'& .MuiInputBase-input': {
+									color: WHATSAPP_COLORS.onSurface,
+								},
+							}}
+						/>
+
+						<TextField
+							fullWidth
+							label="Group Description (Optional)"
+							value={groupDescription}
+							onChange={(e) => setGroupDescription(e.target.value)}
+							variant="outlined"
+							multiline
+							rows={2}
+							sx={{
+								'& .MuiOutlinedInput-root': {
+									bgcolor: WHATSAPP_COLORS.background,
+									borderRadius: '8px',
+									'& fieldset': {
+										borderColor: WHATSAPP_COLORS.divider,
+									},
+									'&:hover fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+									'&.Mui-focused fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+								},
+								'& .MuiInputLabel-root': {
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									'&.Mui-focused': {
+										color: WHATSAPP_COLORS.primary,
+									},
+								},
+								'& .MuiInputBase-input': {
+									color: WHATSAPP_COLORS.onSurface,
+								},
+							}}
+						/>
+
+						<Box>
+							<Typography
+								sx={{
+									color: WHATSAPP_COLORS.onSurface,
+									fontWeight: 500,
+									mb: 2,
+								}}
+							>
+								Select Members
+							</Typography>
+							<Box
+								sx={{
+									maxHeight: 300,
+									overflow: 'auto',
+									border: `1px solid ${WHATSAPP_COLORS.divider}`,
+									borderRadius: 2,
+									bgcolor: WHATSAPP_COLORS.background,
+								}}
+							>
+								{users.map((user) => (
+									<FormControlLabel
+										key={user.firebase_uid}
+										control={
+											<Checkbox
+												checked={selectedMembers.some(
+													(member) => member.firebase_uid === user.firebase_uid
+												)}
+												onChange={(e) => {
+													if (e.target.checked) {
+														setSelectedMembers((prev) => [...prev, user]);
+													} else {
+														setSelectedMembers((prev) =>
+															prev.filter(
+																(member) =>
+																	member.firebase_uid !== user.firebase_uid
+															)
+														);
+													}
+												}}
+												sx={{
+													color: WHATSAPP_COLORS.onSurfaceVariant,
+													'&.Mui-checked': {
+														color: WHATSAPP_COLORS.primary,
+													},
+												}}
+											/>
+										}
+										label={
+											<Box
+												sx={{ display: 'flex', alignItems: 'center', py: 1 }}
+											>
+												<Avatar
+													sx={{
+														bgcolor: WHATSAPP_COLORS.primary,
+														width: 32,
+														height: 32,
+														mr: 2,
+														fontSize: '14px',
+													}}
+												>
+													{user.first_name?.[0]?.toUpperCase()}
+													{user.last_name?.[0]?.toUpperCase()}
+												</Avatar>
+												<Typography sx={{ color: WHATSAPP_COLORS.onSurface }}>
+													{user.first_name} {user.last_name}
+												</Typography>
+											</Box>
+										}
+										sx={{ width: '100%', mx: 0, px: 2 }}
+									/>
+								))}
+							</Box>
+						</Box>
+
+						{selectedMembers.length > 0 && (
+							<Box>
+								<Typography
+									sx={{
+										color: WHATSAPP_COLORS.onSurface,
+										fontWeight: 500,
+										mb: 1,
+									}}
+								>
+									Selected Members ({selectedMembers.length})
+								</Typography>
+								<AvatarGroup max={6}>
+									{selectedMembers.map((member) => (
+										<Avatar
+											key={member.firebase_uid}
+											sx={{
+												bgcolor: WHATSAPP_COLORS.primary,
+												width: 32,
+												height: 32,
+												fontSize: '12px',
+											}}
+										>
+											{member.first_name?.[0]?.toUpperCase()}
+											{member.last_name?.[0]?.toUpperCase()}
+										</Avatar>
+									))}
+								</AvatarGroup>
+							</Box>
+						)}
+					</Stack>
+				</DialogContent>
+				<DialogActions>
+					<Button
+						onClick={() => {
+							setIsCreateGroupDialogOpen(false);
+							setGroupName('');
+							setGroupDescription('');
+							setSelectedMembers([]);
+						}}
+						sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+					>
+						Cancel
+					</Button>
+					<Button
+						onClick={handleCreateGroup}
+						variant="contained"
+						disabled={
+							!groupName.trim() ||
+							selectedMembers.length === 0 ||
+							isSendingMessage
+						}
+						sx={{
+							bgcolor: WHATSAPP_COLORS.primary,
+							'&:hover': { bgcolor: WHATSAPP_COLORS.primaryDark },
+							'&:disabled': {
+								bgcolor: WHATSAPP_COLORS.surfaceVariant,
+								color: WHATSAPP_COLORS.onSurfaceVariant,
+							},
+						}}
+						startIcon={
+							isSendingMessage ? (
+								<CircularProgress size={16} />
+							) : (
+								<GroupAddIcon />
+							)
+						}
+					>
+						{isSendingMessage ? 'Creating...' : 'Create Group'}
+					</Button>
+				</DialogActions>
+			</Dialog>
+
+			{/* Group Info Dialog */}
+			<Dialog
+				open={isGroupInfoDialogOpen}
+				onClose={() => setIsGroupInfoDialogOpen(false)}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						bgcolor: WHATSAPP_COLORS.surface,
+						color: WHATSAPP_COLORS.onSurface,
+						border: `1px solid ${WHATSAPP_COLORS.divider}`,
+					},
+				}}
+			>
+				<DialogTitle sx={{ color: WHATSAPP_COLORS.onSurface }}>
+					Group Info
+				</DialogTitle>
+				<DialogContent>
+					{selectedGroup && (
+						<Stack spacing={3}>
+							<Box sx={{ display: 'flex', alignItems: 'center' }}>
+								<Avatar
+									sx={{
+										bgcolor: WHATSAPP_COLORS.secondary,
+										width: 60,
+										height: 60,
+										mr: 2,
+									}}
+								>
+									<GroupIcon sx={{ fontSize: 30 }} />
+								</Avatar>
+								<Box>
+									<Typography
+										variant="h6"
+										sx={{ color: WHATSAPP_COLORS.onSurface, fontWeight: 500 }}
+									>
+										{selectedGroup.name}
+									</Typography>
+									<Typography sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+										{selectedGroup.members?.length || 0} members
+									</Typography>
+								</Box>
+							</Box>
+
+							{selectedGroup.description && (
+								<Box>
+									<Typography
+										sx={{
+											color: WHATSAPP_COLORS.onSurface,
+											fontWeight: 500,
+											mb: 1,
+										}}
+									>
+										Description
+									</Typography>
+									<Typography sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}>
+										{selectedGroup.description}
+									</Typography>
+								</Box>
+							)}
+
+							<Box>
+								<Typography
+									sx={{
+										color: WHATSAPP_COLORS.onSurface,
+										fontWeight: 500,
+										mb: 1,
+									}}
+								>
+									Members
+								</Typography>
+								<List sx={{ maxHeight: 200, overflow: 'auto' }}>
+									{selectedGroup.members?.map((member) => (
+										<ListItem key={member.firebase_uid} sx={{ px: 0 }}>
+											<ListItemAvatar>
+												<Avatar
+													sx={{
+														bgcolor: WHATSAPP_COLORS.primary,
+														width: 40,
+														height: 40,
+													}}
+												>
+													{member.first_name?.[0]?.toUpperCase()}
+													{member.last_name?.[0]?.toUpperCase()}
+												</Avatar>
+											</ListItemAvatar>
+											<ListItemText
+												primary={
+													<Typography sx={{ color: WHATSAPP_COLORS.onSurface }}>
+														{member.first_name} {member.last_name}
+													</Typography>
+												}
+												secondary={
+													<Typography
+														sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+													>
+														{member.firebase_uid === selectedGroup.creator_id
+															? 'Admin'
+															: 'Member'}
+													</Typography>
+												}
+											/>
+										</ListItem>
+									))}
+								</List>
+							</Box>
+						</Stack>
+					)}
+				</DialogContent>
+				<DialogActions>
+					<Button
+						onClick={() => setIsAddMembersDialogOpen(true)}
+						sx={{ color: WHATSAPP_COLORS.primary }}
+						startIcon={<PersonAddIcon />}
+					>
+						Add Members
+					</Button>
+					<Button
+						onClick={() => handleLeaveGroup(selectedGroup?.id)}
+						sx={{ color: WHATSAPP_COLORS.error }}
+						startIcon={<LeaveGroupIcon />}
+					>
+						Leave Group
+					</Button>
+					<Button
+						onClick={() => setIsGroupInfoDialogOpen(false)}
+						sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+					>
+						Close
 					</Button>
 				</DialogActions>
 			</Dialog>
