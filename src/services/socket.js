@@ -102,6 +102,80 @@ export const emitStopTyping = (userId, receiverId) => {
 	socket.emit('stop_typing', { conversation_id: roomName, user_id: userId });
 };
 
+export const sendFile = async (fileData) => {
+	if (!socket) return;
+
+	const roomName = generateRoomName(
+		fileData.senderId,
+		fileData.receiverId
+	);
+
+	try {
+		// Check file size limit (10MB)
+		const maxSize = 10 * 1024 * 1024; // 10MB
+		if (fileData.file.size > maxSize) {
+			throw new Error('File size too large. Maximum size is 10MB.');
+		}
+
+		// Convert file to base64
+		const base64Data = await fileToBase64(fileData.file);
+		console.log('File converted to base64, size:', base64Data.length);
+		
+		// Split large files into chunks
+		const chunkSize = 64 * 1024; // 64KB chunks
+		const chunks = [];
+		for (let i = 0; i < base64Data.length; i += chunkSize) {
+			chunks.push(base64Data.slice(i, i + chunkSize));
+		}
+
+		console.log('File split into', chunks.length, 'chunks');
+
+		// Send file metadata first
+		socket.emit('send_file_start', {
+			fileName: fileData.file.name,
+			fileType: fileData.file.type,
+			fileSize: fileData.file.size,
+			user_id: fileData.senderId,
+			receiver_id: fileData.receiverId,
+			conversation_id: roomName,
+			message: fileData.message || null,
+			totalChunks: chunks.length
+		});
+
+		// Send chunks
+		chunks.forEach((chunk, index) => {
+			socket.emit('send_file_chunk', {
+				chunkIndex: index,
+				chunkData: chunk,
+				user_id: fileData.senderId,
+				receiver_id: fileData.receiverId,
+				conversation_id: roomName
+			});
+		});
+
+		console.log('File data sent via socket in chunks');
+		return true;
+	} catch (error) {
+		console.error('Error sending file:', error);
+		console.error('Error details:', error.stack);
+		throw error;
+	}
+};
+
+// Helper function to convert file to base64
+const fileToBase64 = (file) => {
+	return new Promise((resolve, reject) => {
+		const reader = new FileReader();
+		reader.readAsDataURL(file);
+		reader.onload = () => {
+			// Remove the data:image/jpeg;base64, part
+			const base64 = reader.result.split(',')[1];
+			resolve(base64);
+		};
+		reader.onerror = error => reject(error);
+	});
+};
+
 const generateRoomName = (userId1, userId2) => {
 	return [userId1, userId2].sort().join('-');
 };
@@ -112,6 +186,7 @@ const socketService = {
 	joinRoom,
 	leaveRoom,
 	sendMessage,
+	sendFile,
 	emitTyping,
 	emitStopTyping,
 };

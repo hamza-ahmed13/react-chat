@@ -23,8 +23,6 @@ import {
 	Avatar,
 	Divider,
 	Badge,
-	Menu,
-	MenuItem,
 	InputAdornment,
 	Alert,
 	Snackbar,
@@ -32,7 +30,7 @@ import {
 import {
 	Send as SendIcon,
 	ExitToApp as ExitToAppIcon,
-	MoreVert as MoreVertIcon,
+
 	Search as SearchIcon,
 	EmojiEmotions as EmojiIcon,
 	AttachFile as AttachFileIcon,
@@ -41,11 +39,16 @@ import {
 	DoneAll as DoneAllIcon,
 	Description as DocumentIcon,
 	Mic as MicIcon,
+	PhotoCamera as PhotoCameraIcon,
+	Image as ImageIcon,
+	Folder as FolderIcon,
+	Close as CloseIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
 	connectSocket,
 	sendMessage,
+	sendFile,
 	joinRoom,
 	leaveRoom,
 } from '../services/socket';
@@ -88,14 +91,18 @@ const Chat = () => {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [error, setError] = useState(null);
 	const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-	const [anchorEl, setAnchorEl] = useState(null);
+
 	const [unreadMessages, setUnreadMessages] = useState({});
 	const [isUploading, setIsUploading] = useState(false);
 	const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
+	const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+	const [previewFile, setPreviewFile] = useState(null);
+	const [previewOpen, setPreviewOpen] = useState(false);
 
 	const messagesEndRef = useRef(null);
 	const messageInputRef = useRef(null);
 	const typingTimeoutRef = useRef(null);
+	const attachmentMenuRef = useRef(null);
 	const navigate = useNavigate();
 	const { auth } = useFirebase();
 
@@ -398,9 +405,23 @@ const Chat = () => {
 		// Set up the event listener
 		socket.on('receive_message', handleReceiveMessage);
 
+		// Handle file upload errors
+		socket.on('file_upload_error', (error) => {
+			console.error('File upload error:', error);
+			setSnackbar({ open: true, message: `File upload failed: ${error.error}`, severity: 'error' });
+			setIsUploading(false);
+		});
+
+		// Handle file upload ready
+		socket.on('file_upload_ready', (data) => {
+			console.log('File upload ready:', data);
+		});
+
 		// Cleanup function
 		return () => {
 			socket.off('receive_message', handleReceiveMessage);
+			socket.off('file_upload_error');
+			socket.off('file_upload_ready');
 			socket.off('connect');
 			socket.off('disconnect');
 		};
@@ -412,6 +433,23 @@ const Chat = () => {
 			setTimeout(scrollToBottom, 100);
 		}
 	}, [messages]);
+
+	// Click outside handler for attachment menu
+	useEffect(() => {
+		const handleClickOutside = (event) => {
+			if (attachmentMenuRef.current && !attachmentMenuRef.current.contains(event.target)) {
+				setShowAttachmentMenu(false);
+			}
+		};
+
+		if (showAttachmentMenu) {
+			document.addEventListener('mousedown', handleClickOutside);
+		}
+
+		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
+		};
+	}, [showAttachmentMenu]);
 
 	const fetchMessages = React.useCallback(async () => {
 		if (!selectedChat) return;
@@ -551,10 +589,60 @@ const Chat = () => {
 	const handleFileSelect = (event) => {
 		const file = event.target.files[0];
 		if (file) {
-			handleSendFile(file);
+			if (file.type.startsWith('image/')) {
+				setPreviewFile(file);
+				setPreviewOpen(true);
+			} else {
+				handleSendFile(file);
+			}
 		}
 		// Reset the input
 		event.target.value = '';
+		setShowAttachmentMenu(false);
+	};
+
+	const handleAttachmentMenuClick = () => {
+		setShowAttachmentMenu(!showAttachmentMenu);
+	};
+
+	const handleImageSelect = () => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = 'image/*';
+		input.onchange = (e) => {
+			const file = e.target.files[0];
+			if (file) {
+				setPreviewFile(file);
+				setPreviewOpen(true);
+			}
+		};
+		input.click();
+		setShowAttachmentMenu(false);
+	};
+
+	const handleDocumentSelect = () => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv';
+		input.onchange = handleFileSelect;
+		input.click();
+		setShowAttachmentMenu(false);
+	};
+
+	const handleCameraSelect = () => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = 'image/*';
+		input.capture = 'environment';
+		input.onchange = (e) => {
+			const file = e.target.files[0];
+			if (file) {
+				setPreviewFile(file);
+				setPreviewOpen(true);
+			}
+		};
+		input.click();
+		setShowAttachmentMenu(false);
 	};
 
 	const handleSendFile = async (file) => {
@@ -564,28 +652,15 @@ const Chat = () => {
 		setSnackbar({ open: true, message: `Uploading ${file.name}...`, severity: 'info' });
 		
 		try {
-			const formData = new FormData();
-			formData.append('attachment', file);
-			formData.append('sender_id', auth.currentUser.uid);
-			formData.append('receiver_id', selectedChat.firebase_uid);
-			formData.append('conversation_id', generateRoomName(auth.currentUser.uid, selectedChat.firebase_uid));
-			
-			if (message.trim()) {
-				formData.append('message', message.trim());
-			}
-
-			const response = await fetch('http://localhost:8000/api/messages/upload', {
-				method: 'POST',
-				body: formData,
+			// Send file via socket
+			await sendFile({
+				file: file,
+				senderId: auth.currentUser.uid,
+				receiverId: selectedChat.firebase_uid,
+				message: message.trim() || null
 			});
-
-			if (!response.ok) {
-				throw new Error('Failed to upload file');
-			}
-
-			const result = await response.json();
-			console.log('File uploaded successfully:', result);
 			
+			console.log('File sent successfully via socket');
 			setSnackbar({ open: true, message: 'File sent successfully!', severity: 'success' });
 			
 			// Clear the message input if it was included
@@ -594,7 +669,7 @@ const Chat = () => {
 			}
 			
 		} catch (error) {
-			console.error('Error uploading file:', error);
+			console.error('Error sending file:', error);
 			setSnackbar({ open: true, message: 'Failed to send file. Please try again.', severity: 'error' });
 		} finally {
 			setIsUploading(false);
@@ -604,76 +679,163 @@ const Chat = () => {
 	const renderMessageContent = (msg) => {
 		const hasAttachment = msg.attachment_url && msg.attachment_type;
 		const hasText = msg.text && msg.text.trim();
+		const isOwnMessage = msg.senderId === auth.currentUser?.uid;
 
 		return (
 			<>
 				{hasAttachment && (
-					<Box sx={{ mb: hasText ? 1 : 0 }}>
+					<Box sx={{ mb: hasText ? 0.5 : 0 }}>
 						{msg.message_type === 'image' && (
 							<Box
-								component="img"
-								src={`http://localhost:8000${msg.attachment_url}`}
-								alt={msg.attachment_name}
 								sx={{
-									maxWidth: '100%',
-									maxHeight: 300,
-									borderRadius: 1,
+									position: 'relative',
+									borderRadius: '8px',
+									overflow: 'hidden',
+									maxWidth: 280,
 									cursor: 'pointer',
+									'&:hover': {
+										'& .image-overlay': {
+											opacity: 1,
+										},
+									},
 								}}
 								onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
-							/>
+							>
+								<Box
+									component="img"
+									src={`http://localhost:8000${msg.attachment_url}`}
+									alt={msg.attachment_name}
+									sx={{
+										width: '100%',
+										height: 'auto',
+										display: 'block',
+									}}
+								/>
+								<Box
+									className="image-overlay"
+									sx={{
+										position: 'absolute',
+										top: 0,
+										left: 0,
+										right: 0,
+										bottom: 0,
+										backgroundColor: 'rgba(0,0,0,0.3)',
+										opacity: 0,
+										transition: 'opacity 0.2s',
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'center',
+									}}
+								>
+									<Typography sx={{ color: 'white', fontSize: '0.8rem' }}>
+										Click to view
+									</Typography>
+								</Box>
+							</Box>
 						)}
 						{msg.message_type === 'video' && (
 							<Box
-								component="video"
-								src={`http://localhost:8000${msg.attachment_url}`}
-								controls
 								sx={{
-									maxWidth: '100%',
-									maxHeight: 300,
-									borderRadius: 1,
+									borderRadius: '8px',
+									overflow: 'hidden',
+									maxWidth: 280,
+									backgroundColor: '#000',
 								}}
-							/>
+							>
+								<Box
+									component="video"
+									src={`http://localhost:8000${msg.attachment_url}`}
+									controls
+									sx={{
+										width: '100%',
+										height: 'auto',
+										display: 'block',
+									}}
+								/>
+							</Box>
 						)}
 						{msg.message_type === 'audio' && (
 							<Box
-								component="audio"
-								src={`http://localhost:8000${msg.attachment_url}`}
-								controls
 								sx={{
-									width: '100%',
-									maxWidth: 300,
+									display: 'flex',
+									alignItems: 'center',
+									gap: 1,
+									p: 1.5,
+									backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)',
+									borderRadius: '8px',
+									minWidth: 200,
 								}}
-							/>
+							>
+								<MicIcon sx={{ color: isOwnMessage ? 'rgba(255,255,255,0.8)' : '#667781' }} />
+								<Box
+									component="audio"
+									src={`http://localhost:8000${msg.attachment_url}`}
+									controls
+									sx={{
+										flexGrow: 1,
+										height: 32,
+										'& audio': {
+											width: '100%',
+										},
+									}}
+								/>
+							</Box>
 						)}
 						{(msg.message_type === 'document' || msg.message_type === 'file') && (
 							<Box
 								sx={{
 									display: 'flex',
 									alignItems: 'center',
-									gap: 1,
-									p: 1,
-									backgroundColor: 'rgba(0,0,0,0.05)',
-									borderRadius: 1,
-																	cursor: 'pointer',
-							}}
-							onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
-						>
-							<DocumentIcon sx={{ color: '#667781', fontSize: '1.5rem' }} />
+									gap: 1.5,
+									p: 1.5,
+									backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.1)' : '#f0f2f5',
+									borderRadius: '8px',
+									cursor: 'pointer',
+									minWidth: 200,
+									maxWidth: 280,
+									border: `1px solid ${isOwnMessage ? 'rgba(255,255,255,0.2)' : '#e9edef'}`,
+									'&:hover': {
+										backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.15)' : '#e9edef',
+									},
+								}}
+								onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
+							>
+								<Box
+									sx={{
+										backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.2)' : '#008069',
+										borderRadius: '50%',
+										p: 1,
+										display: 'flex',
+										alignItems: 'center',
+										justifyContent: 'center',
+									}}
+								>
+									<DocumentIcon sx={{ 
+										color: isOwnMessage ? 'white' : 'white', 
+										fontSize: '1.2rem' 
+									}} />
+								</Box>
 								<Box sx={{ flexGrow: 1, minWidth: 0 }}>
 									<Typography
 										variant="body2"
 										sx={{
 											fontWeight: 'medium',
-											color: '#111b21',
+											color: isOwnMessage ? 'rgba(255,255,255,0.9)' : '#111b21',
 											overflow: 'hidden',
 											textOverflow: 'ellipsis',
 											whiteSpace: 'nowrap',
+											fontSize: '0.9rem',
 										}}
 									>
 										{msg.attachment_name}
 									</Typography>
-									<Typography variant="caption" sx={{ color: '#667781' }}>
+									<Typography 
+										variant="caption" 
+										sx={{ 
+											color: isOwnMessage ? 'rgba(255,255,255,0.7)' : '#667781',
+											fontSize: '0.75rem',
+										}}
+									>
 										{msg.attachment_size ? `${(msg.attachment_size / 1024 / 1024).toFixed(1)} MB` : 'Document'}
 									</Typography>
 								</Box>
@@ -685,10 +847,11 @@ const Chat = () => {
 					<Typography 
 						variant="body2" 
 						sx={{ 
-							color: '#111b21',
-							fontSize: '0.875rem',
+							color: 'inherit',
 							lineHeight: 1.4,
 							wordBreak: 'break-word',
+							fontSize: '0.9rem',
+							mt: hasAttachment ? 0.5 : 0,
 						}}
 					>
 						{msg.text}
@@ -698,13 +861,7 @@ const Chat = () => {
 		);
 	};
 
-	const handleUserMenuClick = (event) => {
-		setAnchorEl(event.currentTarget);
-	};
 
-	const handleUserMenuClose = () => {
-		setAnchorEl(null);
-	};
 
 	const handleLogout = async () => {
 		try {
@@ -744,9 +901,25 @@ const Chat = () => {
 					alignItems: 'center',
 					justifyContent: 'space-between'
 				}}>
-					<Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-						Chats
-					</Typography>
+					<Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+						{auth.currentUser && (
+							<Avatar sx={{ 
+								bgcolor: '#25d366',
+								width: 35,
+								height: 35,
+								fontSize: '0.9rem',
+								fontWeight: 'bold'
+							}}>
+								{users.find(u => u.firebase_uid === auth.currentUser.uid)?.first_name?.[0]?.toUpperCase() || 
+								 auth.currentUser.displayName?.[0]?.toUpperCase() || 
+								 auth.currentUser.email?.[0]?.toUpperCase() || 'U'}
+								{users.find(u => u.firebase_uid === auth.currentUser.uid)?.last_name?.[0]?.toUpperCase() || ''}
+							</Avatar>
+						)}
+						<Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+							Chats
+						</Typography>
+					</Box>
 					<Box sx={{ display: 'flex', gap: 1 }}>
 						<IconButton color="inherit" size="small">
 							<CallIcon />
@@ -754,8 +927,13 @@ const Chat = () => {
 						<IconButton color="inherit" size="small">
 							<VideoCallIcon />
 						</IconButton>
-						<IconButton color="inherit" size="small">
-							<MoreVertIcon />
+						<IconButton 
+							color="inherit" 
+							size="small"
+							onClick={() => setIsLogoutDialogOpen(true)}
+							title="Logout"
+						>
+							<ExitToAppIcon />
 						</IconButton>
 					</Box>
 				</Box>
@@ -926,6 +1104,8 @@ const Chat = () => {
 				</Box>
 			</Drawer>
 
+
+
 			{/* WhatsApp Main Chat Area */}
 			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
 
@@ -975,26 +1155,7 @@ const Chat = () => {
 								<IconButton size="small" sx={{ color: '#54656f' }}>
 									<VideoCallIcon />
 								</IconButton>
-								<IconButton 
-									size="small" 
-									sx={{ color: '#54656f' }}
-									onClick={handleUserMenuClick}
-								>
-									<MoreVertIcon />
-								</IconButton>
-								<Menu
-									anchorEl={anchorEl}
-									open={Boolean(anchorEl)}
-									onClose={handleUserMenuClose}
-								>
-									<MenuItem onClick={() => {
-										handleUserMenuClose();
-										setIsLogoutDialogOpen(true);
-									}}>
-										<ExitToAppIcon sx={{ mr: 1 }} />
-										Logout
-									</MenuItem>
-								</Menu>
+
 							</Box>
 						</Paper>
 
@@ -1106,22 +1267,78 @@ const Chat = () => {
 								>
 									<EmojiIcon />
 								</IconButton>
-								<Box sx={{ position: 'relative' }}>
-									<input
-										type="file"
-										id="file-input"
-										style={{ display: 'none' }}
-										onChange={handleFileSelect}
-										accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv"
-									/>
+								<Box sx={{ position: 'relative' }} ref={attachmentMenuRef}>
 									<IconButton 
 										size="small" 
 										sx={{ color: '#54656f', mb: 0.5 }}
-										onClick={() => document.getElementById('file-input').click()}
+										onClick={handleAttachmentMenuClick}
 										disabled={isUploading}
 									>
 										<AttachFileIcon />
 									</IconButton>
+									
+									{/* WhatsApp-style Attachment Menu */}
+									{showAttachmentMenu && (
+										<Box
+											sx={{
+												position: 'absolute',
+												bottom: '100%',
+												left: 0,
+												mb: 1,
+												backgroundColor: '#ffffff',
+												borderRadius: '8px',
+												boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+												p: 1,
+												minWidth: 200,
+												zIndex: 1000,
+											}}
+										>
+											<Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+												<Box
+													sx={{
+														display: 'flex',
+														alignItems: 'center',
+														p: 1,
+														borderRadius: '4px',
+														cursor: 'pointer',
+														'&:hover': { backgroundColor: '#f5f5f5' },
+													}}
+													onClick={handleImageSelect}
+												>
+													<ImageIcon sx={{ color: '#7c3aed', mr: 2 }} />
+													<Typography variant="body2">Photos & Videos</Typography>
+												</Box>
+												<Box
+													sx={{
+														display: 'flex',
+														alignItems: 'center',
+														p: 1,
+														borderRadius: '4px',
+														cursor: 'pointer',
+														'&:hover': { backgroundColor: '#f5f5f5' },
+													}}
+													onClick={handleCameraSelect}
+												>
+													<PhotoCameraIcon sx={{ color: '#ef4444', mr: 2 }} />
+													<Typography variant="body2">Camera</Typography>
+												</Box>
+												<Box
+													sx={{
+														display: 'flex',
+														alignItems: 'center',
+														p: 1,
+														borderRadius: '4px',
+														cursor: 'pointer',
+														'&:hover': { backgroundColor: '#f5f5f5' },
+													}}
+													onClick={handleDocumentSelect}
+												>
+													<FolderIcon sx={{ color: '#3b82f6', mr: 2 }} />
+													<Typography variant="body2">Document</Typography>
+												</Box>
+											</Box>
+										</Box>
+									)}
 								</Box>
 								<Box sx={{ position: 'relative', flexGrow: 1 }}>
 									{showEmojiPicker && (
@@ -1293,6 +1510,122 @@ const Chat = () => {
 					{snackbar.message}
 				</Alert>
 			</Snackbar>
+
+			{/* Image Preview Dialog */}
+			<Dialog
+				open={previewOpen}
+				onClose={() => setPreviewOpen(false)}
+				maxWidth="md"
+				fullWidth
+				sx={{
+					'& .MuiDialog-paper': {
+						backgroundColor: '#1f2937',
+						color: 'white',
+					},
+				}}
+			>
+				<DialogTitle sx={{ 
+					display: 'flex', 
+					justifyContent: 'space-between', 
+					alignItems: 'center',
+					backgroundColor: '#111827',
+					color: 'white',
+				}}>
+					Send Image
+					<IconButton 
+						onClick={() => setPreviewOpen(false)}
+						sx={{ color: 'white' }}
+					>
+						<CloseIcon />
+					</IconButton>
+				</DialogTitle>
+				<DialogContent sx={{ p: 0, backgroundColor: '#1f2937' }}>
+					{previewFile && (
+						<Box sx={{ 
+							display: 'flex', 
+							flexDirection: 'column',
+							alignItems: 'center',
+							p: 2,
+						}}>
+							<Box
+								component="img"
+								src={URL.createObjectURL(previewFile)}
+								alt="Preview"
+								sx={{
+									maxWidth: '100%',
+									maxHeight: '60vh',
+									borderRadius: '8px',
+									mb: 2,
+								}}
+							/>
+							<TextField
+								fullWidth
+								placeholder="Add a caption..."
+								value={message}
+								onChange={(e) => setMessage(e.target.value)}
+								variant="outlined"
+								multiline
+								maxRows={3}
+								sx={{
+									'& .MuiOutlinedInput-root': {
+										backgroundColor: 'rgba(255,255,255,0.1)',
+										color: 'white',
+										'& fieldset': {
+											borderColor: 'rgba(255,255,255,0.3)',
+										},
+										'&:hover fieldset': {
+											borderColor: 'rgba(255,255,255,0.5)',
+										},
+										'&.Mui-focused fieldset': {
+											borderColor: '#25d366',
+										},
+									},
+									'& .MuiInputBase-input': {
+										color: 'white',
+										'&::placeholder': {
+											color: 'rgba(255,255,255,0.7)',
+										},
+									},
+								}}
+							/>
+						</Box>
+					)}
+				</DialogContent>
+				<DialogActions sx={{ 
+					backgroundColor: '#111827',
+					p: 2,
+					gap: 1,
+				}}>
+					<Button 
+						onClick={() => {
+							setPreviewOpen(false);
+							setPreviewFile(null);
+							setMessage('');
+						}}
+						sx={{ color: 'rgba(255,255,255,0.7)' }}
+					>
+						Cancel
+					</Button>
+					<Button
+						onClick={() => {
+							handleSendFile(previewFile);
+							setPreviewOpen(false);
+							setPreviewFile(null);
+						}}
+						variant="contained"
+						disabled={isUploading}
+						sx={{
+							backgroundColor: '#25d366',
+							'&:hover': {
+								backgroundColor: '#128c7e',
+							},
+						}}
+						startIcon={isUploading ? <CircularProgress size={16} /> : <SendIcon />}
+					>
+						{isUploading ? 'Sending...' : 'Send'}
+					</Button>
+				</DialogActions>
+			</Dialog>
 		</Box>
 	);
 };
