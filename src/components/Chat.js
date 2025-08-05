@@ -262,6 +262,9 @@ const Chat = () => {
 
 		const handleReceiveMessage = (newMessage) => {
 			console.log('Received new message:', newMessage);
+			console.log('Message type:', newMessage.message_type);
+			console.log('Has attachment:', !!newMessage.attachment_url);
+			console.log('Attachment URL:', newMessage.attachment_url);
 			console.log(
 				'Current selectedChat:',
 				selectedChat?.firebase_uid || 'none'
@@ -286,11 +289,32 @@ const Chat = () => {
 						user.firebase_uid === newMessage.sender_id ||
 						user.firebase_uid === newMessage.receiver_id
 					) {
+						let displayText = newMessage.text || newMessage.message;
+						if (newMessage.attachment_url && !displayText) {
+							switch (newMessage.message_type) {
+								case 'image':
+									displayText = '📷 Image';
+									break;
+								case 'video':
+									displayText = '🎥 Video';
+									break;
+								case 'audio':
+									displayText = '🎵 Audio';
+									break;
+								case 'document':
+								case 'file':
+									displayText = `📄 ${newMessage.attachment_name}`;
+									break;
+								default:
+									displayText = '📎 Attachment';
+							}
+						}
+
 						return {
 							...user,
 							lastMessage: {
-								text: newMessage.message,
-								timestamp: newMessage.created_at,
+								text: displayText,
+								timestamp: newMessage.timestamp || newMessage.created_at,
 								isOutgoing: newMessage.sender_id === auth.currentUser.uid,
 							},
 						};
@@ -316,11 +340,14 @@ const Chat = () => {
 			});
 
 			// Update messages array if the message belongs to the current chat
-			if (
-				selectedChat &&
-				(newMessage.sender_id === selectedChat.firebase_uid ||
-					newMessage.receiver_id === selectedChat.firebase_uid)
-			) {
+			const isMessageForCurrentChat = selectedChat && (
+				(newMessage.sender_id === auth.currentUser.uid && newMessage.receiver_id === selectedChat.firebase_uid) ||
+				(newMessage.sender_id === selectedChat.firebase_uid && newMessage.receiver_id === auth.currentUser.uid) ||
+				(newMessage.senderId === auth.currentUser.uid && newMessage.receiverId === selectedChat.firebase_uid) ||
+				(newMessage.senderId === selectedChat.firebase_uid && newMessage.receiverId === auth.currentUser.uid)
+			);
+
+			if (isMessageForCurrentChat) {
 				console.log(
 					'✅ Message belongs to current chat, updating messages array'
 				);
@@ -330,18 +357,23 @@ const Chat = () => {
 
 				const formattedMessage = {
 					id: newMessage.id,
-					text: newMessage.message,
-					senderId: newMessage.sender_id,
-					receiverId: newMessage.receiver_id,
-					senderName: newMessage.sender
+					text: newMessage.text || newMessage.message,
+					senderId: newMessage.senderId || newMessage.sender_id,
+					receiverId: newMessage.receiverId || newMessage.receiver_id,
+					senderName: newMessage.senderName || (newMessage.sender
 						? `${newMessage.sender.first_name} ${newMessage.sender.last_name}`
-						: 'Unknown',
-					timestamp: newMessage.created_at,
+						: 'Unknown'),
+					timestamp: newMessage.timestamp || newMessage.created_at,
 					status: newMessage.status,
 					message_type: newMessage.message_type,
+					attachment_url: newMessage.attachment_url,
+					attachment_type: newMessage.attachment_type,
+					attachment_name: newMessage.attachment_name,
+					attachment_size: newMessage.attachment_size,
 				};
 
 				console.log('Formatted message:', formattedMessage);
+				console.log('Message has attachment_url:', !!formattedMessage.attachment_url);
 
 				// Check for duplicate messages (prevent double-adding real messages)
 				setMessages((prevMessages) => {
@@ -366,6 +398,13 @@ const Chat = () => {
 					);
 					const newMessages = [...prevMessages, formattedMessage];
 					console.log('New messages count:', newMessages.length);
+					console.log('Message added with attachment_url:', formattedMessage.attachment_url);
+					
+					// Force re-render by updating messages state
+					setTimeout(() => {
+						console.log('Force updating messages state for attachment rendering');
+					}, 100);
+					
 					return newMessages;
 				});
 
@@ -680,6 +719,14 @@ const Chat = () => {
 		const hasAttachment = msg.attachment_url && msg.attachment_type;
 		const hasText = msg.text && msg.text.trim();
 		const isOwnMessage = msg.senderId === auth.currentUser?.uid;
+		
+		console.log('Rendering message:', {
+			id: msg.id,
+			hasAttachment,
+			attachment_url: msg.attachment_url,
+			message_type: msg.message_type,
+			hasText
+		});
 
 		return (
 			<>
