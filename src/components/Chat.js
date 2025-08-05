@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import {
@@ -43,12 +43,17 @@ import {
 	Folder as FolderIcon,
 	Close as CloseIcon,
 	KeyboardArrowDown as ArrowDownIcon,
+	Group as GroupIcon,
+	Add as AddIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
+import GroupCreation from './GroupCreation';
 import {
 	connectSocket,
 	sendMessage,
+	sendGroupMessage,
 	sendFile,
+	sendGroupFile,
 	joinRoom,
 	leaveRoom,
 } from '../services/socket';
@@ -113,6 +118,7 @@ const Chat = () => {
 	const [isLoading, setIsLoading] = useState(true);
 	const [selectedChat, setSelectedChat] = useState(null);
 	const [users, setUsers] = useState([]);
+	const [groups, setGroups] = useState([]);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [error, setError] = useState(null);
 	const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -129,6 +135,7 @@ const Chat = () => {
 	const [showCamera, setShowCamera] = useState(false);
 	const [cameraStream, setCameraStream] = useState(null);
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+	const [showGroupCreation, setShowGroupCreation] = useState(false);
 
 	const messagesEndRef = useRef(null);
 	const messagesContainerRef = useRef(null);
@@ -147,10 +154,11 @@ const Chat = () => {
 			user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
 	);
 
+	const filteredGroups = groups.filter(group =>
+		group.name?.toLowerCase().includes(searchQuery.toLowerCase())
+	);
 
-
-	useEffect(() => {
-		const fetchUsers = async () => {
+	const fetchUsers = useCallback(async () => {
 			if (!auth.currentUser) {
 				console.log('No current user found');
 				return;
@@ -234,7 +242,7 @@ const Chat = () => {
 					// Transform users data to match chat users format
 					processedUsers = data.data
 						.filter((user) => user.firebase_uid !== auth.currentUser.uid)
-						.map((user) => ({
+					.map((user) => ({
 							...user,
 							lastMessage: null,
 						}));
@@ -265,10 +273,44 @@ const Chat = () => {
 			} finally {
 				setIsLoading(false);
 			}
-		};
+		}, [auth.currentUser]);
 
-		fetchUsers();
+	const fetchGroups = useCallback(async () => {
+		if (!auth.currentUser) {
+			console.log('No current user found for groups');
+			return;
+		}
+
+		try {
+			console.log('Fetching groups for user:', auth.currentUser.uid);
+			const response = await fetch(
+				`http://localhost:8000/api/groups/user/${auth.currentUser.uid}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+			const data = await response.json();
+			console.log('Groups response:', data);
+
+			if (response.ok && data.status && Array.isArray(data.data)) {
+				setGroups(data.data);
+				console.log('Groups loaded:', data.data.length);
+			} else {
+				console.error('Failed to fetch groups:', data.message);
+				setGroups([]);
+			}
+		} catch (error) {
+			console.error('Error fetching groups:', error);
+			setGroups([]);
+		}
 	}, [auth.currentUser]);
+
+	useEffect(() => {
+		fetchUsers();
+		fetchGroups();
+	}, [fetchUsers, fetchGroups]);
 
 	// Set up socket listener for new messages - separate useEffect with selectedChat dependency
 	useEffect(() => {
@@ -372,7 +414,7 @@ const Chat = () => {
 				}
 
 				return updatedUsers;
-			});
+		});
 
 			// Update messages array if the message belongs to the current chat
 			const isMessageForCurrentChat = selectedChat && (
@@ -479,6 +521,63 @@ const Chat = () => {
 		// Set up the event listener
 		socket.on('receive_message', handleReceiveMessage);
 
+		// Handle group messages
+		socket.on('receive_group_message', (newMessage) => {
+			console.log('🔵 Received group message:', newMessage);
+			console.log('🔵 Message has attachment_url:', !!newMessage.attachment_url);
+			console.log('🔵 Message type:', newMessage.message_type);
+			console.log('🔵 Current selectedChat:', selectedChat);
+			console.log('🔵 selectedChat.id:', selectedChat?.id, 'newMessage.group_id:', newMessage.group_id);
+			
+			// Check if this message is for the current group chat
+			const isMessageForCurrentChat = selectedChat?.isGroup && 
+				selectedChat.id === newMessage.group_id;
+
+			console.log('🔵 isMessageForCurrentChat:', isMessageForCurrentChat);
+
+			if (isMessageForCurrentChat) {
+				setMessages(prevMessages => {
+					// Check if message already exists
+					const messageExists = prevMessages.some(msg => msg.id === newMessage.id);
+					if (messageExists) {
+						console.log('Group message already exists, updating status');
+						return prevMessages.map(msg => 
+							msg.id === newMessage.id ? { ...msg, ...newMessage } : msg
+						);
+					}
+					
+					// Add new message
+					const transformedMessage = {
+						id: newMessage.id,
+						text: newMessage.text || newMessage.message,
+						senderId: newMessage.senderId || newMessage.sender_id,
+						groupId: newMessage.group_id,
+						senderName: newMessage.senderName || (newMessage.sender ? 
+							`${newMessage.sender.first_name} ${newMessage.sender.last_name}` : 
+							'Unknown'),
+						timestamp: newMessage.timestamp || newMessage.created_at,
+						status: newMessage.status,
+						message_type: newMessage.message_type,
+						attachment_url: newMessage.attachment_url,
+						attachment_type: newMessage.attachment_type,
+						attachment_name: newMessage.attachment_name,
+						attachment_size: newMessage.attachment_size,
+						chat_type: 'group'
+					};
+					
+					console.log('🔵 Adding new group message to state:', transformedMessage);
+					console.log('🔵 Transformed message has attachment_url:', !!transformedMessage.attachment_url);
+					return [...prevMessages, transformedMessage];
+				});
+				
+				// Scroll to bottom after receiving message
+				setTimeout(scrollToBottom, 100);
+			}
+			
+			// Update groups list to reflect latest message
+			fetchGroups();
+		});
+
 		// Handle file upload errors
 		socket.on('file_upload_error', (error) => {
 			console.error('File upload error:', error);
@@ -541,18 +640,35 @@ const Chat = () => {
 		if (!selectedChat) return;
 
 		try {
-			const roomName = generateRoomName(
-				auth.currentUser.uid,
-				selectedChat.firebase_uid
-			);
-			const response = await fetch(
-				`http://localhost:8000/api/messages/${roomName}`,
-				{
-					headers: {
-						'ngrok-skip-browser-warning': 'true',
-					},
-				}
-			);
+			let response;
+			
+			if (selectedChat.isGroup) {
+				// Fetch group messages
+				const groupId = selectedChat.id;
+				response = await fetch(
+					`http://localhost:8000/api/groups/${groupId}/messages/${auth.currentUser.uid}`,
+					{
+						headers: {
+							'ngrok-skip-browser-warning': 'true',
+						},
+					}
+				);
+			} else {
+				// Fetch individual messages
+				const roomName = generateRoomName(
+					auth.currentUser.uid,
+					selectedChat.firebase_uid
+				);
+				response = await fetch(
+					`http://localhost:8000/api/messages/${roomName}`,
+					{
+						headers: {
+							'ngrok-skip-browser-warning': 'true',
+						},
+					}
+				);
+			}
+			
 			if (!response.ok) throw new Error('Failed to fetch messages');
 			const data = await response.json();
 			setMessages(data);
@@ -644,19 +760,34 @@ const Chat = () => {
 	const handleSendMessage = async () => {
 		if (!message.trim() || !selectedChat) return;
 
-		const messageData = {
-			text: message.trim(),
-			senderId: auth.currentUser.uid,
-			receiverId: selectedChat.firebase_uid,
-		};
-
+		// Store the message before clearing
+		const messageText = message.trim();
+		
 		// Clear the input immediately
 		setMessage('');
 		messageInputRef.current?.focus();
 
 		try {
-			await sendMessage(messageData);
-			console.log('Message sent successfully via socket');
+			if (selectedChat.isGroup) {
+				// Send group message
+				const messageData = {
+					text: messageText,
+					senderId: auth.currentUser.uid,
+					groupId: selectedChat.id,
+				};
+				await sendGroupMessage(messageData);
+				console.log('Group message sent successfully via socket');
+			} else {
+				// Send individual message
+				const messageData = {
+					text: messageText,
+					senderId: auth.currentUser.uid,
+					receiverId: selectedChat.firebase_uid,
+				};
+				await sendMessage(messageData);
+				console.log('Message sent successfully via socket');
+			}
+			
 			// The message will appear via the receive_message socket event
 			// Scroll to bottom after sending
 			setTimeout(scrollToBottom, 100);
@@ -858,15 +989,26 @@ const Chat = () => {
 		setSnackbar({ open: true, message: `Uploading ${file.name}...`, severity: 'info' });
 		
 		try {
-			// Send file via socket
-			await sendFile({
-				file: file,
-				senderId: auth.currentUser.uid,
-				receiverId: selectedChat.firebase_uid,
-				message: message.trim() || null
-			});
+			if (selectedChat.isGroup) {
+				// Send group file
+				await sendGroupFile({
+					file: file,
+					senderId: auth.currentUser.uid,
+					groupId: selectedChat.id,
+					message: message.trim() || null
+				});
+				console.log('Group file sent successfully via socket');
+			} else {
+				// Send individual file
+				await sendFile({
+					file: file,
+					senderId: auth.currentUser.uid,
+					receiverId: selectedChat.firebase_uid,
+					message: message.trim() || null
+				});
+				console.log('File sent successfully via socket');
+			}
 			
-			console.log('File sent successfully via socket');
 			setSnackbar({ open: true, message: 'File sent successfully!', severity: 'success' });
 			
 			// Clear the message input if it was included
@@ -895,7 +1037,7 @@ const Chat = () => {
 			hasText
 		});
 
-		return (
+	return (
 			<>
 				{hasAttachment && (
 					<Box sx={{ mb: hasText ? 0.5 : 0 }}>
@@ -1091,6 +1233,23 @@ const Chat = () => {
 			behavior: 'smooth',
 			block: 'end',
 			inline: 'nearest'
+		});
+	};
+
+	const handleGroupCreated = (newGroup) => {
+		console.log('New group created:', newGroup);
+		setSnackbar({ 
+			open: true, 
+			message: `Group "${newGroup.name}" created successfully!`, 
+			severity: 'success' 
+		});
+		// Refresh groups list and select the new group
+		fetchGroups();
+		// Set the new group as selected chat
+		setSelectedChat({
+			...newGroup,
+			isGroup: true,
+			firebase_uid: `group-${newGroup.id}` // Create a unique identifier for groups
 		});
 	};
 
@@ -1320,9 +1479,209 @@ const Chat = () => {
 					) : users.length === 0 ? (
 						<Box sx={{ p: 2, textAlign: 'center' }}>
 							<Typography sx={{ color: '#8696a0' }}>No chats available</Typography>
-						</Box>
-					) : (
+					</Box>
+				) : (
 						<List sx={{ p: 0 }}>
+							{/* Create New Group Button */}
+							<ListItem disablePadding>
+								<ListItemButton
+									onClick={() => setShowGroupCreation(true)}
+									sx={{
+										backgroundColor: 'rgba(0, 168, 132, 0.1)',
+										'&:hover': {
+											backgroundColor: 'rgba(0, 168, 132, 0.2)',
+											transform: 'translateX(4px)',
+										},
+										py: 2.5,
+										px: 3,
+										borderLeft: '4px solid #00a884',
+										borderRadius: '0 12px 12px 0',
+										margin: '2px 8px 8px 0',
+										transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+										position: 'relative',
+										boxShadow: '0 2px 8px rgba(0,168,132,0.15)',
+									}}
+								>
+									<ListItemAvatar>
+										<Avatar sx={{ 
+											background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
+											width: 52,
+											height: 52,
+											fontSize: '1.5rem',
+											fontWeight: 600,
+											color: '#ffffff',
+											border: '2px solid rgba(0,168,132,0.2)',
+											boxShadow: '0 3px 10px rgba(0,168,132,0.2)',
+											transition: 'all 0.3s ease',
+											'&:hover': {
+												transform: 'scale(1.05)',
+												boxShadow: '0 5px 15px rgba(0,168,132,0.3)'
+											}
+										}}>
+											<GroupIcon />
+										</Avatar>
+									</ListItemAvatar>
+									<ListItemText
+										primaryTypographyProps={{ component: 'div' }}
+										secondaryTypographyProps={{ component: 'div' }}
+										primary={
+											<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+												<Typography
+													sx={{
+														fontWeight: 600,
+														fontSize: '1rem',
+														color: '#e9edef',
+													}}
+												>
+													Create New Group
+												</Typography>
+												<AddIcon sx={{ color: '#00a884', fontSize: '1.2rem' }} />
+											</Box>
+										}
+										secondary={
+											<Typography
+												sx={{
+													fontSize: '0.85rem',
+													color: '#8696a0',
+													mt: 0.5,
+												}}
+											>
+												Create a group chat with multiple users
+											</Typography>
+										}
+									/>
+								</ListItemButton>
+							</ListItem>
+							
+							{/* Divider */}
+							<Divider sx={{ 
+								borderColor: 'rgba(134, 150, 160, 0.15)', 
+								mx: 2, 
+								my: 1 
+							}} />
+							
+							{/* Groups */}
+							{filteredGroups.map((group) => (
+								<React.Fragment key={`group-${group.id}`}>
+									<ListItem disablePadding>
+										<ListItemButton
+											selected={selectedChat?.firebase_uid === `group-${group.id}`}
+											onClick={() => setSelectedChat({
+												...group,
+												isGroup: true,
+												firebase_uid: `group-${group.id}`
+											})}
+											sx={{
+												backgroundColor:
+													selectedChat?.firebase_uid === `group-${group.id}`
+														? 'rgba(42, 57, 66, 0.8)'
+														: 'transparent',
+												'&:hover': {
+													backgroundColor: 'rgba(42, 57, 66, 0.6)',
+													transform: 'translateX(4px)',
+												},
+												py: 2.5,
+												px: 3,
+												borderLeft: selectedChat?.firebase_uid === `group-${group.id}` 
+													? '4px solid #00a884' 
+													: '4px solid transparent',
+												borderRadius: '0 12px 12px 0',
+												margin: '2px 8px 2px 0',
+												transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+												position: 'relative',
+												'&::before': selectedChat?.firebase_uid === `group-${group.id}` ? {
+													content: '""',
+													position: 'absolute',
+													left: 0,
+													top: 0,
+													bottom: 0,
+													width: '4px',
+													background: 'linear-gradient(180deg, #00a884 0%, #008c7a 100%)',
+													borderRadius: '0 2px 2px 0'
+												} : {},
+												boxShadow: selectedChat?.firebase_uid === `group-${group.id}` 
+													? '0 2px 8px rgba(0,168,132,0.15)' 
+													: 'none',
+											}}
+										>
+											<ListItemAvatar>
+												<Avatar sx={{ 
+													background: 'linear-gradient(135deg, #25d366 0%, #128c7e 100%)',
+													width: 52,
+													height: 52,
+													fontSize: '1.3rem',
+													fontWeight: 600,
+													color: '#ffffff',
+													border: '2px solid rgba(37,211,102,0.2)',
+													boxShadow: '0 3px 10px rgba(37,211,102,0.2)',
+													transition: 'all 0.3s ease',
+													'&:hover': {
+														transform: 'scale(1.05)',
+														boxShadow: '0 5px 15px rgba(37,211,102,0.3)'
+													}
+												}}>
+													<GroupIcon />
+												</Avatar>
+											</ListItemAvatar>
+											<ListItemText
+												primaryTypographyProps={{ component: 'div' }}
+												secondaryTypographyProps={{ component: 'div' }}
+												primary={
+													<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+														<Typography
+															sx={{
+																fontWeight: 600,
+																fontSize: '1rem',
+																color: '#e9edef',
+															}}
+														>
+															{group.name}
+														</Typography>
+														{group.lastMessage && (
+															<Typography
+																sx={{
+																	fontSize: '0.75rem',
+																	color: '#8696a0',
+																}}
+															>
+																{new Date(group.lastMessage.timestamp).toLocaleTimeString([], {
+																	hour: '2-digit',
+																	minute: '2-digit',
+																})}
+															</Typography>
+														)}
+													</Box>
+												}
+												secondary={
+													<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
+														<Typography
+															sx={{
+																fontSize: '0.85rem',
+																color: '#8696a0',
+																overflow: 'hidden',
+																textOverflow: 'ellipsis',
+																whiteSpace: 'nowrap',
+																maxWidth: '180px',
+															}}
+														>
+															{group.lastMessage ? (
+																group.lastMessage.text || 
+																(group.lastMessage.attachment_type ? 
+																	`📎 ${group.lastMessage.attachment_type}` : 
+																	'No messages yet')
+															) : (
+																`${group.memberCount || 0} members`
+															)}
+														</Typography>
+													</Box>
+												}
+											/>
+										</ListItemButton>
+								</ListItem>
+							</React.Fragment>
+						))}
+							
+							{/* Individual Users */}
 							{filteredUsers.map((user) => (
 								<React.Fragment key={user.firebase_uid}>
 									<ListItem disablePadding>
@@ -1395,7 +1754,7 @@ const Chat = () => {
 														}}
 													>
 														{`${user.first_name || ''} ${user.last_name || ''}`}
-													</Typography>
+						</Typography>
 													{user.lastMessage && (
 														<Typography
 															variant="caption"
@@ -1423,7 +1782,7 @@ const Chat = () => {
 															whiteSpace: 'nowrap',
 															maxWidth: '180px',
 														}}
-													>
+						>
 														{user.lastMessage
 															? truncateMessage(user.lastMessage.text, 25)
 															: 'No messages yet'}
@@ -1532,15 +1891,15 @@ const Chat = () => {
 										timeout={300}
 										key={msg.id || `temp-${msg.timestamp}-${index}`}
 									>
-										<Box
-											sx={{
-												display: 'flex',
+									<Box
+										sx={{
+											display: 'flex',
 												justifyContent: msg.senderId === auth.currentUser.uid ? 'flex-end' : 'flex-start',
 												mb: 1.5,
 												px: 3,
 												...messageSlideIn
-											}}
-										>
+										}}
+									>
 										<Box
 											sx={{
 												maxWidth: '70%',
@@ -1584,6 +1943,21 @@ const Chat = () => {
 												}
 											}}
 										>
+											{/* Show sender name for group messages (except own messages) */}
+											{selectedChat?.isGroup && msg.senderId !== auth.currentUser.uid && (
+											<Typography
+													variant="caption"
+													sx={{
+														color: '#00a884',
+														fontSize: '0.75rem',
+														fontWeight: 600,
+														mb: 0.5,
+														display: 'block',
+													}}
+											>
+													{msg.senderName || 'Unknown'}
+											</Typography>
+											)}
 											{renderMessageContent(msg)}
 											<Box sx={{ 
 												display: 'flex', 
@@ -1611,7 +1985,7 @@ const Chat = () => {
 														color: '#53bdeb',
 													}} />
 												)}
-											</Box>
+									</Box>
 										</Box>
 										</Box>
 									</Grow>
@@ -1701,7 +2075,7 @@ const Chat = () => {
 										}}
 										onClick={handleAttachmentMenuClick}
 										disabled={isUploading}
-									>
+						>
 										<AttachFileIcon />
 									</IconButton>
 									
@@ -1814,13 +2188,13 @@ const Chat = () => {
 											</IconButton>
 										</Box>
 									) : (
-										<TextField
-											fullWidth
-											value={message}
+								<TextField
+									fullWidth
+									value={message}
 											onChange={handleMessageChange}
 											placeholder="Type a message"
-											variant="outlined"
-											size="small"
+									variant="outlined"
+									size="small"
 											inputRef={messageInputRef}
 											multiline
 											maxRows={4}
@@ -1862,7 +2236,7 @@ const Chat = () => {
 								{!isRecording && (
 									message.trim() ? (
 										<IconButton
-											type="submit"
+									type="submit"
 											disabled={isUploading}
 											sx={{
 												background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
@@ -2144,6 +2518,13 @@ const Chat = () => {
 					</Button>
 				</DialogActions>
 			</Dialog>
+
+			{/* Group Creation Dialog */}
+			<GroupCreation
+				open={showGroupCreation}
+				onClose={() => setShowGroupCreation(false)}
+				onGroupCreated={handleGroupCreated}
+			/>
 		</Box>
 	);
 };

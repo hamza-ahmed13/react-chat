@@ -90,6 +90,25 @@ export const sendMessage = async (messageData) => {
 	}
 };
 
+export const sendGroupMessage = async (messageData) => {
+	if (!socket) return;
+
+	try {
+		// Send group message via socket
+		socket.emit('send_group_message', {
+			message: messageData.text,
+			user_id: messageData.senderId,
+			group_id: messageData.groupId
+		});
+
+		console.log('Group message sent via socket');
+		return true;
+	} catch (error) {
+		console.error('Error sending group message:', error);
+		throw error;
+	}
+};
+
 export const emitTyping = (userId, receiverId) => {
 	if (!socket) return;
 	const roomName = generateRoomName(userId, receiverId);
@@ -139,6 +158,7 @@ export const sendFile = async (fileData) => {
 			receiver_id: fileData.receiverId,
 			conversation_id: roomName,
 			message: fileData.message || null,
+			isGroup: false,
 			totalChunks: chunks.length
 		});
 
@@ -176,6 +196,78 @@ const fileToBase64 = (file) => {
 	});
 };
 
+export const sendGroupFile = async (fileData) => {
+	if (!socket) return;
+
+	try {
+		// Check file size limit (10MB)
+		const maxSize = 10 * 1024 * 1024; // 10MB
+		if (fileData.file.size > maxSize) {
+			throw new Error('File size too large. Maximum size is 10MB.');
+		}
+
+		// Convert file to base64
+		const base64Data = await fileToBase64(fileData.file);
+		console.log('Group file converted to base64, size:', base64Data.length);
+		
+		// Split large files into chunks
+		const chunkSize = 64 * 1024; // 64KB chunks
+		const chunks = [];
+		for (let i = 0; i < base64Data.length; i += chunkSize) {
+			chunks.push(base64Data.slice(i, i + chunkSize));
+		}
+
+		console.log('Group file split into', chunks.length, 'chunks');
+
+		// Send file metadata first
+		socket.emit('send_file_start', {
+			fileName: fileData.file.name,
+			fileType: fileData.file.type,
+			fileSize: fileData.file.size,
+			user_id: fileData.senderId,
+			group_id: fileData.groupId,
+			message: fileData.message || null,
+			isGroup: true,
+			totalChunks: chunks.length
+		});
+
+		// Wait for server to be ready
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				reject(new Error('File upload timeout'));
+			}, 30000); // 30 second timeout
+
+			socket.once('file_upload_ready', () => {
+				clearTimeout(timeout);
+				console.log('Server ready for group file upload');
+				
+				// Send chunks
+				chunks.forEach((chunk, index) => {
+					socket.emit('send_file_chunk', {
+						chunkIndex: index,
+						chunkData: chunk,
+						user_id: fileData.senderId,
+						group_id: fileData.groupId,
+						isGroup: true
+					});
+				});
+
+				console.log('All group file chunks sent');
+				resolve(true);
+			});
+
+			socket.once('file_upload_error', (error) => {
+				clearTimeout(timeout);
+				console.error('Group file upload error:', error);
+				reject(new Error(error.error || 'Group file upload failed'));
+			});
+		});
+	} catch (error) {
+		console.error('Error sending group file:', error);
+		throw error;
+	}
+};
+
 const generateRoomName = (userId1, userId2) => {
 	return [userId1, userId2].sort().join('-');
 };
@@ -186,7 +278,9 @@ const socketService = {
 	joinRoom,
 	leaveRoom,
 	sendMessage,
+	sendGroupMessage,
 	sendFile,
+	sendGroupFile,
 	emitTyping,
 	emitStopTyping,
 };

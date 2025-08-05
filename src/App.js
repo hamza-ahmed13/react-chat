@@ -71,7 +71,7 @@ function App() {
 	return (
 		<Suspense fallback={<LoadingScreen />}>
 			<FirebaseProvider>
-				<AppRoutes />
+					<AppRoutes />
 			</FirebaseProvider>
 		</Suspense>
 	);
