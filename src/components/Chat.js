@@ -39,7 +39,7 @@ import {
 	DoneAll as DoneAllIcon,
 	Description as DocumentIcon,
 	Mic as MicIcon,
-	PhotoCamera as PhotoCameraIcon,
+
 	Image as ImageIcon,
 	Folder as FolderIcon,
 	Close as CloseIcon,
@@ -101,12 +101,16 @@ const Chat = () => {
 	const [isRecording, setIsRecording] = useState(false);
 	const [mediaRecorder, setMediaRecorder] = useState(null);
 	const [recordingTime, setRecordingTime] = useState(0);
+	const [showCamera, setShowCamera] = useState(false);
+	const [cameraStream, setCameraStream] = useState(null);
 
 	const messagesEndRef = useRef(null);
 	const messageInputRef = useRef(null);
 	const typingTimeoutRef = useRef(null);
 	const attachmentMenuRef = useRef(null);
 	const recordingTimerRef = useRef(null);
+	const videoRef = useRef(null);
+	const canvasRef = useRef(null);
 	const navigate = useNavigate();
 	const { auth } = useFirebase();
 
@@ -689,6 +693,7 @@ const Chat = () => {
 			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 			const recorder = new MediaRecorder(stream);
 			const chunks = [];
+			let isCancelled = false;
 
 			recorder.ondataavailable = (e) => {
 				if (e.data.size > 0) {
@@ -697,23 +702,45 @@ const Chat = () => {
 			};
 
 			recorder.onstop = () => {
-				const blob = new Blob(chunks, { type: 'audio/webm' });
-				const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
-				handleSendFile(file);
-				
 				// Stop all tracks
 				stream.getTracks().forEach(track => track.stop());
+				
+				// Clear timer
+				if (recordingTimerRef.current) {
+					clearInterval(recordingTimerRef.current);
+					recordingTimerRef.current = null;
+				}
+
+				// Only send file if not cancelled
+				if (!isCancelled && chunks.length > 0) {
+					const blob = new Blob(chunks, { type: 'audio/webm' });
+					const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+					handleSendFile(file);
+				}
+			};
+
+			// Store reference to cancel function
+			recorder.cancel = () => {
+				isCancelled = true;
 			};
 
 			setMediaRecorder(recorder);
 			setIsRecording(true);
 			setRecordingTime(0);
+			
+			// Start recording
 			recorder.start();
 
 			// Start timer
 			recordingTimerRef.current = setInterval(() => {
-				setRecordingTime(prev => prev + 1);
+				setRecordingTime(prev => {
+					const newTime = prev + 1;
+					console.log('Recording time:', newTime);
+					return newTime;
+				});
 			}, 1000);
+
+			console.log('Recording started, timer initialized');
 
 		} catch (error) {
 			console.error('Error starting recording:', error);
@@ -722,41 +749,79 @@ const Chat = () => {
 	};
 
 	const stopRecording = () => {
+		console.log('Stopping recording...');
 		if (mediaRecorder && isRecording) {
 			mediaRecorder.stop();
 			setIsRecording(false);
 			setRecordingTime(0);
 			if (recordingTimerRef.current) {
 				clearInterval(recordingTimerRef.current);
+				recordingTimerRef.current = null;
 			}
+			console.log('Recording stopped');
 		}
 	};
 
 	const cancelRecording = () => {
+		console.log('Cancelling recording...');
 		if (mediaRecorder && isRecording) {
-			mediaRecorder.stream.getTracks().forEach(track => track.stop());
+			// Mark as cancelled before stopping
+			if (mediaRecorder.cancel) {
+				mediaRecorder.cancel();
+			}
+			
+			// Stop the recorder
+			mediaRecorder.stop();
 			setIsRecording(false);
 			setRecordingTime(0);
 			if (recordingTimerRef.current) {
 				clearInterval(recordingTimerRef.current);
+				recordingTimerRef.current = null;
 			}
+			console.log('Recording cancelled');
 		}
 	};
 
-	const handleCameraSelect = () => {
-		const input = document.createElement('input');
-		input.type = 'file';
-		input.accept = 'image/*';
-		input.capture = 'environment';
-		input.onchange = (e) => {
-			const file = e.target.files[0];
-			if (file) {
+	const handleCameraSelect = async () => {
+		setShowAttachmentMenu(false);
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ 
+				video: { facingMode: 'environment' } 
+			});
+			setCameraStream(stream);
+			setShowCamera(true);
+		} catch (error) {
+			console.error('Error accessing camera:', error);
+			setSnackbar({ open: true, message: 'Could not access camera', severity: 'error' });
+		}
+	};
+
+	const capturePhoto = () => {
+		if (videoRef.current && canvasRef.current) {
+			const canvas = canvasRef.current;
+			const video = videoRef.current;
+			
+			canvas.width = video.videoWidth;
+			canvas.height = video.videoHeight;
+			
+			const ctx = canvas.getContext('2d');
+			ctx.drawImage(video, 0, 0);
+			
+			canvas.toBlob((blob) => {
+				const file = new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' });
 				setPreviewFile(file);
 				setPreviewOpen(true);
-			}
-		};
-		input.click();
-		setShowAttachmentMenu(false);
+				closeCameraModal();
+			}, 'image/jpeg', 0.8);
+		}
+	};
+
+	const closeCameraModal = () => {
+		if (cameraStream) {
+			cameraStream.getTracks().forEach(track => track.stop());
+			setCameraStream(null);
+		}
+		setShowCamera(false);
 	};
 
 	const handleSendFile = async (file) => {
@@ -888,7 +953,7 @@ const Chat = () => {
 									minWidth: 200,
 								}}
 							>
-								<MicIcon sx={{ color: isOwnMessage ? 'rgba(255,255,255,0.8)' : '#667781' }} />
+								<MicIcon sx={{ color: '#25d366' }} />
 								<Box
 									component="audio"
 									src={`http://localhost:8000${msg.attachment_url}`}
@@ -910,21 +975,21 @@ const Chat = () => {
 									alignItems: 'center',
 									gap: 1.5,
 									p: 1.5,
-									backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.1)' : '#f0f2f5',
+									backgroundColor: isOwnMessage ? '#dcf8c6' : '#ffffff',
 									borderRadius: '8px',
 									cursor: 'pointer',
 									minWidth: 200,
 									maxWidth: 280,
-									border: `1px solid ${isOwnMessage ? 'rgba(255,255,255,0.2)' : '#e9edef'}`,
+									border: `1px solid ${isOwnMessage ? '#c1f0a8' : '#e9edef'}`,
 									'&:hover': {
-										backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.15)' : '#e9edef',
+										backgroundColor: isOwnMessage ? '#d1f2bd' : '#f5f5f5',
 									},
 								}}
 								onClick={() => window.open(`http://localhost:8000${msg.attachment_url}`, '_blank')}
 							>
 								<Box
 									sx={{
-										backgroundColor: isOwnMessage ? 'rgba(255,255,255,0.2)' : '#008069',
+										backgroundColor: '#008069',
 										borderRadius: '50%',
 										p: 1,
 										display: 'flex',
@@ -933,7 +998,7 @@ const Chat = () => {
 									}}
 								>
 									<DocumentIcon sx={{ 
-										color: isOwnMessage ? 'white' : 'white', 
+										color: 'white', 
 										fontSize: '1.2rem' 
 									}} />
 								</Box>
@@ -942,7 +1007,7 @@ const Chat = () => {
 										variant="body2"
 										sx={{
 											fontWeight: 'medium',
-											color: isOwnMessage ? 'rgba(255,255,255,0.9)' : '#111b21',
+											color: '#111b21',
 											overflow: 'hidden',
 											textOverflow: 'ellipsis',
 											whiteSpace: 'nowrap',
@@ -954,7 +1019,7 @@ const Chat = () => {
 									<Typography 
 										variant="caption" 
 										sx={{ 
-											color: isOwnMessage ? 'rgba(255,255,255,0.7)' : '#667781',
+											color: '#667781',
 											fontSize: '0.75rem',
 										}}
 									>
@@ -1430,20 +1495,7 @@ const Chat = () => {
 													<ImageIcon sx={{ color: '#7c3aed', mr: 2 }} />
 													<Typography variant="body2">Photos & Videos</Typography>
 												</Box>
-												<Box
-													sx={{
-														display: 'flex',
-														alignItems: 'center',
-														p: 1,
-														borderRadius: '4px',
-														cursor: 'pointer',
-														'&:hover': { backgroundColor: '#f5f5f5' },
-													}}
-													onClick={handleCameraSelect}
-												>
-													<PhotoCameraIcon sx={{ color: '#ef4444', mr: 2 }} />
-													<Typography variant="body2">Camera</Typography>
-												</Box>
+
 												<Box
 													sx={{
 														display: 'flex',
@@ -1472,7 +1524,7 @@ const Chat = () => {
 														setShowAttachmentMenu(false);
 													}}
 												>
-													<MicIcon sx={{ color: '#ff6b35', mr: 2 }} />
+													<MicIcon sx={{ color: '#25d366', mr: 2 }} />
 													<Typography variant="body2">Audio</Typography>
 												</Box>
 											</Box>
@@ -1508,7 +1560,7 @@ const Chat = () => {
 												border: '1px solid #ffeaa7',
 											}}
 										>
-											<MicIcon sx={{ color: '#e74c3c', mr: 1, fontSize: '1.2rem' }} />
+											<MicIcon sx={{ color: '#25d366', mr: 1, fontSize: '1.2rem' }} />
 											<Typography variant="body2" sx={{ flexGrow: 1, color: '#856404' }}>
 												Recording... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
 											</Typography>
@@ -1590,17 +1642,17 @@ const Chat = () => {
 										<IconButton
 											onClick={startRecording}
 											sx={{
-												backgroundColor: '#54656f',
+												backgroundColor: '#25d366',
 												color: 'white',
 												width: 40,
 												height: 40,
 												mb: 0.5,
 												'&:hover': {
-													backgroundColor: '#008069',
+													backgroundColor: '#128c7e',
 												},
 											}}
 										>
-											<MicIcon />
+											<MicIcon sx={{ color: 'white' }} />
 										</IconButton>
 									)
 								)}
