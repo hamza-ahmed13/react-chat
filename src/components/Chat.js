@@ -26,23 +26,23 @@ import {
 	InputAdornment,
 	Alert,
 	Snackbar,
+	Fade,
+	Slide,
+	Grow,
 } from '@mui/material';
 import {
 	Send as SendIcon,
 	ExitToApp as ExitToAppIcon,
-
 	Search as SearchIcon,
 	EmojiEmotions as EmojiIcon,
 	AttachFile as AttachFileIcon,
-	Call as CallIcon,
-	VideoCall as VideoCallIcon,
 	DoneAll as DoneAllIcon,
 	Description as DocumentIcon,
 	Mic as MicIcon,
-
 	Image as ImageIcon,
 	Folder as FolderIcon,
 	Close as CloseIcon,
+	KeyboardArrowDown as ArrowDownIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import {
@@ -54,7 +54,32 @@ import {
 } from '../services/socket';
 import EmojiPicker from 'emoji-picker-react';
 
-const DRAWER_WIDTH = 300;
+const DRAWER_WIDTH = 340; // Increased for better proportions
+
+// Professional animation styles
+const slideInFromLeft = {
+	'@keyframes slideInFromLeft': {
+		from: { transform: 'translateX(-100%)', opacity: 0 },
+		to: { transform: 'translateX(0)', opacity: 1 }
+	},
+	animation: 'slideInFromLeft 0.3s ease-out'
+};
+
+const fadeIn = {
+	'@keyframes fadeIn': {
+		from: { opacity: 0 },
+		to: { opacity: 1 }
+	},
+	animation: 'fadeIn 0.3s ease-out'
+};
+
+const messageSlideIn = {
+	'@keyframes messageSlideIn': {
+		from: { transform: 'translateY(20px)', opacity: 0 },
+		to: { transform: 'translateY(0)', opacity: 1 }
+	},
+	animation: 'messageSlideIn 0.2s ease-out'
+};
 
 const formatTimestamp = (timestamp) => {
 	const date = new Date(timestamp);
@@ -103,8 +128,10 @@ const Chat = () => {
 	const [recordingTime, setRecordingTime] = useState(0);
 	const [showCamera, setShowCamera] = useState(false);
 	const [cameraStream, setCameraStream] = useState(null);
+	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
 	const messagesEndRef = useRef(null);
+	const messagesContainerRef = useRef(null);
 	const messageInputRef = useRef(null);
 	const typingTimeoutRef = useRef(null);
 	const attachmentMenuRef = useRef(null);
@@ -1060,12 +1087,23 @@ const Chat = () => {
 	};
 
 	const scrollToBottom = () => {
-		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+		messagesEndRef.current?.scrollIntoView({ 
+			behavior: 'smooth',
+			block: 'end',
+			inline: 'nearest'
+		});
 	};
 
 	return (
-		<Box sx={{ display: 'flex', height: '100vh', backgroundColor: '#f0f2f5' }}>
-			{/* WhatsApp Sidebar */}
+		<Box sx={{ 
+			display: 'flex', 
+			height: '100vh', 
+			backgroundColor: '#0b141a',
+			fontFamily: '"Segoe UI", Helvetica, Arial, sans-serif',
+			overflow: 'hidden',
+			...fadeIn
+		}}>
+			{/* Professional Cinnova Sidebar */}
 			<Drawer
 				variant="permanent"
 				sx={{
@@ -1074,28 +1112,51 @@ const Chat = () => {
 					'& .MuiDrawer-paper': {
 						width: DRAWER_WIDTH,
 						boxSizing: 'border-box',
-						backgroundColor: '#fff',
-						borderRight: '1px solid #e9edef',
+						backgroundColor: '#202c33',
+						borderRight: '1px solid rgba(134, 150, 160, 0.15)',
+						color: '#e9edef',
+						boxShadow: '2px 0 8px rgba(0,0,0,0.3)',
+						...slideInFromLeft
 					},
 				}}
 			>
-				{/* WhatsApp Header */}
+				{/* Professional Cinnova Header */}
 				<Box sx={{ 
-					backgroundColor: '#008069', 
-					color: 'white',
-					p: 2,
+					backgroundColor: '#2a3942', 
+					color: '#e9edef',
+					p: 3,
 					display: 'flex',
 					alignItems: 'center',
-					justifyContent: 'space-between'
+					justifyContent: 'space-between',
+					borderBottom: '1px solid rgba(59, 74, 84, 0.5)',
+					boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+					position: 'relative',
+					'&::after': {
+						content: '""',
+						position: 'absolute',
+						bottom: 0,
+						left: 0,
+						right: 0,
+						height: '1px',
+						background: 'linear-gradient(90deg, transparent, rgba(0,168,132,0.3), transparent)'
+					}
 				}}>
 					<Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
 						{auth.currentUser && (
 							<Avatar sx={{ 
-								bgcolor: '#25d366',
-								width: 35,
-								height: 35,
-								fontSize: '0.9rem',
-								fontWeight: 'bold'
+								bgcolor: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
+								width: 45,
+								height: 45,
+								fontSize: '1.1rem',
+								fontWeight: 600,
+								border: '3px solid rgba(0,168,132,0.3)',
+								boxShadow: '0 4px 12px rgba(0,168,132,0.25)',
+								transition: 'all 0.3s ease',
+								cursor: 'pointer',
+								'&:hover': {
+									transform: 'scale(1.05)',
+									boxShadow: '0 6px 20px rgba(0,168,132,0.4)'
+								}
 							}}>
 								{users.find(u => u.firebase_uid === auth.currentUser.uid)?.first_name?.[0]?.toUpperCase() || 
 								 auth.currentUser.displayName?.[0]?.toUpperCase() || 
@@ -1103,19 +1164,33 @@ const Chat = () => {
 								{users.find(u => u.firebase_uid === auth.currentUser.uid)?.last_name?.[0]?.toUpperCase() || ''}
 							</Avatar>
 						)}
-						<Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-							Chats
-						</Typography>
+						<Box>
+							<Typography variant="h6" sx={{ 
+								fontWeight: 600, 
+								color: '#e9edef',
+								fontSize: '1.3rem',
+								letterSpacing: '0.5px'
+							}}>
+								Cinnova
+							</Typography>
+							<Typography variant="caption" sx={{ 
+								color: '#8696a0',
+								fontSize: '0.75rem',
+								fontWeight: 400
+							}}>
+								Chat
+							</Typography>
+						</Box>
 					</Box>
-					<Box sx={{ display: 'flex', gap: 1 }}>
-						<IconButton color="inherit" size="small">
-							<CallIcon />
-						</IconButton>
-						<IconButton color="inherit" size="small">
-							<VideoCallIcon />
-						</IconButton>
+					<Box sx={{ display: 'flex', gap: 0.5 }}>
 						<IconButton 
-							color="inherit" 
+							sx={{ 
+								color: '#aebac1',
+								'&:hover': { 
+									backgroundColor: 'rgba(255,255,255,0.1)',
+									color: '#e9edef'
+								}
+							}} 
 							size="small"
 							onClick={() => setIsLogoutDialogOpen(true)}
 							title="Logout"
@@ -1125,8 +1200,8 @@ const Chat = () => {
 					</Box>
 				</Box>
 
-				{/* Search Bar */}
-				<Box sx={{ p: 2, backgroundColor: '#fff' }}>
+				{/* Professional Search Bar */}
+				<Box sx={{ p: 2.5, backgroundColor: '#202c33' }}>
 					<TextField
 						fullWidth
 						placeholder="Search or start new chat"
@@ -1137,14 +1212,20 @@ const Chat = () => {
 						sx={{ 
 							'& .MuiOutlinedInput-root': {
 								borderRadius: 3,
-								backgroundColor: '#f0f2f5',
+								backgroundColor: '#2a3942',
+								color: '#e9edef',
+								transition: 'all 0.3s ease',
+								boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
 								'&:hover': {
-									backgroundColor: '#e9edef',
+									backgroundColor: '#3b4a54',
+									boxShadow: '0 4px 8px rgba(0,0,0,0.15)',
+									transform: 'translateY(-1px)',
 								},
 								'&.Mui-focused': {
-									backgroundColor: '#fff',
+									backgroundColor: '#3b4a54',
+									boxShadow: '0 0 0 2px rgba(0,168,132,0.2)',
 									'& .MuiOutlinedInput-notchedOutline': {
-										borderColor: '#008069',
+										borderColor: '#00a884',
 									},
 								},
 								'& .MuiOutlinedInput-notchedOutline': {
@@ -1152,14 +1233,21 @@ const Chat = () => {
 								},
 							},
 							'& .MuiInputBase-input': {
-								fontSize: '0.9rem',
+								fontSize: '0.95rem',
+								color: '#e9edef',
+								padding: '12px 16px',
+								'&::placeholder': {
+									color: '#8696a0',
+									opacity: 1,
+									fontWeight: 400,
+								},
 							},
 						}}
 						InputProps={{
 							startAdornment: (
 								<InputAdornment position="start">
 									<SearchIcon sx={{ 
-										color: '#667781',
+										color: '#8696a0',
 										fontSize: '1.1rem',
 									}} />
 								</InputAdornment>
@@ -1168,20 +1256,70 @@ const Chat = () => {
 					/>
 				</Box>
 
-				{/* Chat List */}
-				<Box sx={{ overflow: 'auto', flexGrow: 1 }}>
+				{/* Modern Cinnova Chat List */}
+				<Box sx={{ overflow: 'auto', flexGrow: 1, backgroundColor: '#202c33' }}>
 					{error && (
-						<Alert severity="error" sx={{ mx: 2, mb: 2 }}>
+						<Alert severity="error" sx={{ mx: 2, mb: 2, backgroundColor: '#2a3942', color: '#e9edef' }}>
 							{error}
 						</Alert>
 					)}
 					{isLoading ? (
-						<Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-							<CircularProgress />
+						<Box sx={{ p: 2 }}>
+							{[...Array(6)].map((_, index) => (
+								<Box key={index} sx={{ 
+									display: 'flex', 
+									alignItems: 'center', 
+									p: 2.5, 
+									gap: 2,
+									mb: 1,
+									borderRadius: '0 12px 12px 0',
+									margin: '2px 8px 2px 0',
+								}}>
+									<Box sx={{
+										width: 52,
+										height: 52,
+										borderRadius: '50%',
+										background: 'linear-gradient(90deg, #2a3942 0%, #3b4a54 50%, #2a3942 100%)',
+										backgroundSize: '200% 100%',
+										animation: 'shimmer 1.5s infinite',
+										'@keyframes shimmer': {
+											'0%': { backgroundPosition: '200% 0' },
+											'100%': { backgroundPosition: '-200% 0' }
+										}
+									}} />
+									<Box sx={{ flexGrow: 1 }}>
+										<Box sx={{
+											height: 16,
+											borderRadius: 1,
+											background: 'linear-gradient(90deg, #2a3942 0%, #3b4a54 50%, #2a3942 100%)',
+											backgroundSize: '200% 100%',
+											animation: 'shimmer 1.5s infinite',
+											mb: 1,
+											width: `${60 + Math.random() * 40}%`,
+											'@keyframes shimmer': {
+												'0%': { backgroundPosition: '200% 0' },
+												'100%': { backgroundPosition: '-200% 0' }
+											}
+										}} />
+										<Box sx={{
+											height: 12,
+											borderRadius: 1,
+											background: 'linear-gradient(90deg, #2a3942 0%, #3b4a54 50%, #2a3942 100%)',
+											backgroundSize: '200% 100%',
+											animation: 'shimmer 1.5s infinite',
+											width: `${40 + Math.random() * 30}%`,
+											'@keyframes shimmer': {
+												'0%': { backgroundPosition: '200% 0' },
+												'100%': { backgroundPosition: '-200% 0' }
+											}
+										}} />
+									</Box>
+								</Box>
+							))}
 						</Box>
 					) : users.length === 0 ? (
 						<Box sx={{ p: 2, textAlign: 'center' }}>
-							<Typography color="textSecondary">No chats available</Typography>
+							<Typography sx={{ color: '#8696a0' }}>No chats available</Typography>
 						</Box>
 					) : (
 						<List sx={{ p: 0 }}>
@@ -1194,22 +1332,51 @@ const Chat = () => {
 											sx={{
 												backgroundColor:
 													selectedChat?.firebase_uid === user.firebase_uid
-														? '#f0f2f5'
-														: 'inherit',
+														? 'rgba(42, 57, 66, 0.8)'
+														: 'transparent',
 												'&:hover': {
-													backgroundColor: '#f5f6f6',
+													backgroundColor: 'rgba(42, 57, 66, 0.6)',
+													transform: 'translateX(4px)',
 												},
-												py: 1.5,
-												px: 2,
+												py: 2.5,
+												px: 3,
+												borderLeft: selectedChat?.firebase_uid === user.firebase_uid 
+													? '4px solid #00a884' 
+													: '4px solid transparent',
+												borderRadius: '0 12px 12px 0',
+												margin: '2px 8px 2px 0',
+												transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+												position: 'relative',
+												'&::before': selectedChat?.firebase_uid === user.firebase_uid ? {
+													content: '""',
+													position: 'absolute',
+													left: 0,
+													top: 0,
+													bottom: 0,
+													width: '4px',
+													background: 'linear-gradient(180deg, #00a884 0%, #008c7a 100%)',
+													borderRadius: '0 2px 2px 0'
+												} : {},
+												boxShadow: selectedChat?.firebase_uid === user.firebase_uid 
+													? '0 2px 8px rgba(0,168,132,0.15)' 
+													: 'none',
 											}}
 										>
 										<ListItemAvatar>
 											<Avatar sx={{ 
-												bgcolor: '#008069',
-												width: 49,
-												height: 49,
-												fontSize: '1.1rem',
-												fontWeight: 'bold'
+												background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
+												width: 52,
+												height: 52,
+												fontSize: '1.3rem',
+												fontWeight: 600,
+												color: '#ffffff',
+												border: '2px solid rgba(0,168,132,0.2)',
+												boxShadow: '0 3px 10px rgba(0,168,132,0.2)',
+												transition: 'all 0.3s ease',
+												'&:hover': {
+													transform: 'scale(1.05)',
+													boxShadow: '0 5px 15px rgba(0,168,132,0.3)'
+												}
 											}}>
 												{user.first_name?.[0]?.toUpperCase()}
 												{user.last_name?.[0]?.toUpperCase()}
@@ -1222,9 +1389,9 @@ const Chat = () => {
 												<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
 													<Typography
 														sx={{
-															fontWeight: unreadMessages[user.firebase_uid] > 0 ? 'bold' : 'normal',
-															fontSize: '0.95rem',
-															color: '#111b21',
+															fontWeight: unreadMessages[user.firebase_uid] > 0 ? 600 : 400,
+															fontSize: '1rem',
+															color: '#e9edef',
 														}}
 													>
 														{`${user.first_name || ''} ${user.last_name || ''}`}
@@ -1294,107 +1461,126 @@ const Chat = () => {
 
 
 			{/* WhatsApp Main Chat Area */}
-			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
+			{/* Modern Cinnova Chat Area */}
+			<Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', backgroundColor: '#0b141a' }}>
 
 				{selectedChat ? (
 					<>
-						{/* WhatsApp Chat Header */}
+						{/* Modern Cinnova Chat Header */}
 						<Paper
-							elevation={1}
+							elevation={0}
 							sx={{
-								backgroundColor: '#f0f2f5',
-								borderBottom: '1px solid #e9edef',
+								backgroundColor: '#202c33',
+								borderBottom: '1px solid #3b4a54',
 								display: 'flex',
 								alignItems: 'center',
-								p: 1,
-								gap: 1,
+								p: 2,
+								gap: 2,
 							}}
 						>
 							<Avatar sx={{ 
-								bgcolor: '#008069',
-								width: 40,
-								height: 40,
-								fontSize: '1rem',
-								fontWeight: 'bold'
+								bgcolor: '#00a884',
+								width: 45,
+								height: 45,
+								fontSize: '1.1rem',
+								fontWeight: 600,
+								color: '#ffffff'
 							}}>
 								{selectedChat.first_name?.[0]?.toUpperCase()}
 								{selectedChat.last_name?.[0]?.toUpperCase()}
 							</Avatar>
 							<Box sx={{ flexGrow: 1 }}>
 								<Typography variant="subtitle1" sx={{ 
-									fontWeight: '500',
-									color: '#111b21',
-									fontSize: '1rem'
+									fontWeight: 500,
+									color: '#e9edef',
+									fontSize: '1.1rem'
 								}}>
 									{selectedChat.first_name} {selectedChat.last_name}
 								</Typography>
 								<Typography variant="caption" sx={{ 
-									color: '#667781',
-									fontSize: '0.8rem'
+									color: '#8696a0',
+									fontSize: '0.85rem'
 								}}>
 									online
 								</Typography>
 							</Box>
-							<Box sx={{ display: 'flex', gap: 1 }}>
-								<IconButton size="small" sx={{ color: '#54656f' }}>
-									<CallIcon />
-								</IconButton>
-								<IconButton size="small" sx={{ color: '#54656f' }}>
-									<VideoCallIcon />
-								</IconButton>
 
-							</Box>
 						</Paper>
 
-						{/* WhatsApp Messages Area */}
+						{/* Modern Cinnova Messages Area */}
 						<Box
+							ref={messagesContainerRef}
 							sx={{
 								flexGrow: 1,
 								overflow: 'auto',
-								backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23e9edef\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
-								backgroundColor: '#efeae2',
+								backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23182229\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
+								backgroundColor: '#0b141a',
 								p: 1,
+								position: 'relative',
+								scrollBehavior: 'smooth',
+							}}
+							onScroll={(e) => {
+								const { scrollTop, scrollHeight, clientHeight } = e.target;
+								const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+								setShowScrollToBottom(!isNearBottom);
 							}}
 						>
 							<Container maxWidth={false} sx={{ p: 0 }}>
 								{messages.map((msg, index) => (
-									<Box
+									<Grow
+										in={true}
+										timeout={300}
 										key={msg.id || `temp-${msg.timestamp}-${index}`}
-										sx={{
-											display: 'flex',
-											justifyContent: msg.senderId === auth.currentUser.uid ? 'flex-end' : 'flex-start',
-											mb: 1,
-											px: 2,
-										}}
 									>
 										<Box
 											sx={{
-												maxWidth: '65%',
-												backgroundColor: msg.senderId === auth.currentUser.uid ? '#d9fdd3' : '#ffffff',
-												borderRadius: '7.5px',
-												p: 1.5,
+												display: 'flex',
+												justifyContent: msg.senderId === auth.currentUser.uid ? 'flex-end' : 'flex-start',
+												mb: 1.5,
+												px: 3,
+												...messageSlideIn
+											}}
+										>
+										<Box
+											sx={{
+												maxWidth: '70%',
+												background: msg.senderId === auth.currentUser.uid 
+													? 'linear-gradient(135deg, #005c4b 0%, #004a3d 100%)' 
+													: 'linear-gradient(135deg, #202c33 0%, #1a252b 100%)',
+												borderRadius: msg.senderId === auth.currentUser.uid ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+												p: 2,
 												position: 'relative',
-												boxShadow: '0 1px 0.5px rgba(0,0,0,.13)',
+												boxShadow: '0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.2)',
+												color: '#e9edef',
+												backdropFilter: 'blur(10px)',
+												border: '1px solid rgba(255,255,255,0.1)',
+												transition: 'all 0.2s ease',
+												'&:hover': {
+													transform: 'translateY(-1px)',
+													boxShadow: '0 4px 12px rgba(0,0,0,0.2), 0 2px 6px rgba(0,0,0,0.15)'
+												},
 												'&::before': msg.senderId === auth.currentUser.uid ? {
 													content: '""',
 													position: 'absolute',
-													top: 0,
-													right: -8,
+													bottom: 0,
+													right: -6,
 													width: 0,
 													height: 0,
-													borderLeft: '8px solid #d9fdd3',
+													borderLeft: '8px solid #005c4b',
 													borderTop: '8px solid transparent',
 													borderBottom: '8px solid transparent',
+													filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))'
 												} : {
 													content: '""',
 													position: 'absolute',
-													top: 0,
-													left: -8,
+													bottom: 0,
+													left: -6,
 													width: 0,
 													height: 0,
-													borderRight: '8px solid #ffffff',
+													borderRight: '8px solid #202c33',
 													borderTop: '8px solid transparent',
 													borderBottom: '8px solid transparent',
+													filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.1))'
 												}
 											}}
 										>
@@ -1427,29 +1613,77 @@ const Chat = () => {
 												)}
 											</Box>
 										</Box>
-									</Box>
+										</Box>
+									</Grow>
 								))}
 								<div ref={messagesEndRef} />
 							</Container>
+							
+							{/* Scroll to Bottom Button */}
+							<Fade in={showScrollToBottom}>
+								<IconButton
+									onClick={scrollToBottom}
+									sx={{
+										position: 'absolute',
+										bottom: 20,
+										right: 20,
+										background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
+										color: 'white',
+										width: 48,
+										height: 48,
+										boxShadow: '0 4px 12px rgba(0,168,132,0.3)',
+										transition: 'all 0.3s ease',
+										'&:hover': {
+											background: 'linear-gradient(135deg, #008c7a 0%, #00756a 100%)',
+											transform: 'scale(1.1)',
+											boxShadow: '0 6px 20px rgba(0,168,132,0.4)',
+										},
+										'&:active': {
+											transform: 'scale(0.95)',
+										},
+									}}
+								>
+									<ArrowDownIcon />
+								</IconButton>
+							</Fade>
 						</Box>
 
-						{/* WhatsApp Input Area */}
+						{/* Professional Cinnova Input Area */}
 						<Paper
 							component="form"
 							onSubmit={(e) => {
 								e.preventDefault();
 								handleSendMessage();
 							}}
+							elevation={0}
 							sx={{
-								backgroundColor: '#f0f2f5',
-								borderTop: '1px solid #e9edef',
-								p: 1,
+								backgroundColor: '#202c33',
+								borderTop: '1px solid rgba(59, 74, 84, 0.5)',
+								p: 2.5,
+								boxShadow: '0 -2px 8px rgba(0,0,0,0.1)',
+								position: 'relative',
+								'&::before': {
+									content: '""',
+									position: 'absolute',
+									top: 0,
+									left: 0,
+									right: 0,
+									height: '1px',
+									background: 'linear-gradient(90deg, transparent, rgba(0,168,132,0.2), transparent)'
+								}
 							}}
 						>
 							<Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
 								<IconButton 
 									size="small" 
-									sx={{ color: '#54656f', mb: 0.5 }}
+									sx={{ 
+										color: '#8696a0', 
+										mb: 0.5,
+										'&:hover': { 
+											backgroundColor: 'rgba(255,255,255,0.1)',
+											color: '#e9edef'
+										}
+									}}
 									onClick={() => setShowEmojiPicker(!showEmojiPicker)}
 								>
 									<EmojiIcon />
@@ -1457,14 +1691,21 @@ const Chat = () => {
 								<Box sx={{ position: 'relative' }} ref={attachmentMenuRef}>
 									<IconButton 
 										size="small" 
-										sx={{ color: '#54656f', mb: 0.5 }}
+										sx={{ 
+											color: '#8696a0', 
+											mb: 0.5,
+											'&:hover': { 
+												backgroundColor: 'rgba(255,255,255,0.1)',
+												color: '#e9edef'
+											}
+										}}
 										onClick={handleAttachmentMenuClick}
 										disabled={isUploading}
 									>
 										<AttachFileIcon />
 									</IconButton>
 									
-									{/* WhatsApp-style Attachment Menu */}
+									{/* Cinnova-style Attachment Menu */}
 									{showAttachmentMenu && (
 										<Box
 											sx={{
@@ -1472,12 +1713,13 @@ const Chat = () => {
 												bottom: '100%',
 												left: 0,
 												mb: 1,
-												backgroundColor: '#ffffff',
+												backgroundColor: '#2a3942',
 												borderRadius: '8px',
-												boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+												boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
 												p: 1,
 												minWidth: 200,
 												zIndex: 1000,
+												border: '1px solid #3b4a54',
 											}}
 										>
 											<Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
@@ -1488,12 +1730,12 @@ const Chat = () => {
 														p: 1,
 														borderRadius: '4px',
 														cursor: 'pointer',
-														'&:hover': { backgroundColor: '#f5f5f5' },
+														'&:hover': { backgroundColor: '#3b4a54' },
 													}}
 													onClick={handleImageSelect}
 												>
 													<ImageIcon sx={{ color: '#7c3aed', mr: 2 }} />
-													<Typography variant="body2">Photos & Videos</Typography>
+													<Typography variant="body2" sx={{ color: '#e9edef' }}>Photos & Videos</Typography>
 												</Box>
 
 												<Box
@@ -1503,12 +1745,12 @@ const Chat = () => {
 														p: 1,
 														borderRadius: '4px',
 														cursor: 'pointer',
-														'&:hover': { backgroundColor: '#f5f5f5' },
+														'&:hover': { backgroundColor: '#3b4a54' },
 													}}
 													onClick={handleDocumentSelect}
 												>
 													<FolderIcon sx={{ color: '#3b82f6', mr: 2 }} />
-													<Typography variant="body2">Document</Typography>
+													<Typography variant="body2" sx={{ color: '#e9edef' }}>Document</Typography>
 												</Box>
 												<Box
 													sx={{
@@ -1517,7 +1759,7 @@ const Chat = () => {
 														p: 1,
 														borderRadius: '4px',
 														cursor: 'pointer',
-														'&:hover': { backgroundColor: '#f5f5f5' },
+														'&:hover': { backgroundColor: '#3b4a54' },
 													}}
 													onClick={() => {
 														startRecording();
@@ -1525,7 +1767,7 @@ const Chat = () => {
 													}}
 												>
 													<MicIcon sx={{ color: '#25d366', mr: 2 }} />
-													<Typography variant="body2">Audio</Typography>
+													<Typography variant="body2" sx={{ color: '#e9edef' }}>Audio</Typography>
 												</Box>
 											</Box>
 										</Box>
@@ -1553,21 +1795,21 @@ const Chat = () => {
 											sx={{
 												display: 'flex',
 												alignItems: 'center',
-												backgroundColor: '#fff3cd',
+												backgroundColor: '#2a3942',
 												borderRadius: '24px',
 												px: 2,
 												py: 1,
-												border: '1px solid #ffeaa7',
+												border: '1px solid #3b4a54',
 											}}
 										>
 											<MicIcon sx={{ color: '#25d366', mr: 1, fontSize: '1.2rem' }} />
-											<Typography variant="body2" sx={{ flexGrow: 1, color: '#856404' }}>
+											<Typography variant="body2" sx={{ flexGrow: 1, color: '#e9edef' }}>
 												Recording... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
 											</Typography>
-											<IconButton size="small" onClick={cancelRecording} sx={{ color: '#dc3545', mr: 1 }}>
+											<IconButton size="small" onClick={cancelRecording} sx={{ color: '#f87171', mr: 1 }}>
 												<CloseIcon fontSize="small" />
 											</IconButton>
-											<IconButton size="small" onClick={stopRecording} sx={{ color: '#28a745' }}>
+											<IconButton size="small" onClick={stopRecording} sx={{ color: '#25d366' }}>
 												<SendIcon fontSize="small" />
 											</IconButton>
 										</Box>
@@ -1585,8 +1827,9 @@ const Chat = () => {
 											sx={{
 												'& .MuiOutlinedInput-root': {
 													borderRadius: '24px',
-													backgroundColor: '#ffffff',
+													backgroundColor: '#2a3942',
 													fontSize: '0.9rem',
+													color: '#e9edef',
 													'& fieldset': {
 														borderColor: 'transparent',
 													},
@@ -1600,6 +1843,11 @@ const Chat = () => {
 												'& .MuiInputBase-input': {
 													py: 1.25,
 													px: 2,
+													color: '#e9edef',
+													'&::placeholder': {
+														color: '#8696a0',
+														opacity: 1,
+													},
 												},
 											}}
 											onKeyPress={(e) => {
@@ -1617,17 +1865,26 @@ const Chat = () => {
 											type="submit"
 											disabled={isUploading}
 											sx={{
-												backgroundColor: '#008069',
+												background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
 												color: 'white',
-												width: 40,
-												height: 40,
+												width: 48,
+												height: 48,
 												mb: 0.5,
+												boxShadow: '0 4px 12px rgba(0,168,132,0.3)',
+												transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
 												'&:hover': {
-													backgroundColor: '#006a56',
+													background: 'linear-gradient(135deg, #008c7a 0%, #00756a 100%)',
+													transform: 'scale(1.05) translateY(-2px)',
+													boxShadow: '0 6px 20px rgba(0,168,132,0.4)',
+												},
+												'&:active': {
+													transform: 'scale(0.95)',
 												},
 												'&:disabled': {
-													backgroundColor: '#54656f',
-													color: 'rgba(255,255,255,0.5)',
+													background: 'linear-gradient(135deg, #3b4a54 0%, #2a3942 100%)',
+													color: 'rgba(255,255,255,0.3)',
+													boxShadow: 'none',
+													transform: 'none',
 												},
 											}}
 											onClick={handleSendMessage}
@@ -1642,13 +1899,20 @@ const Chat = () => {
 										<IconButton
 											onClick={startRecording}
 											sx={{
-												backgroundColor: '#25d366',
+												background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
 												color: 'white',
-												width: 40,
-												height: 40,
+												width: 48,
+												height: 48,
 												mb: 0.5,
+												boxShadow: '0 4px 12px rgba(0,168,132,0.3)',
+												transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
 												'&:hover': {
-													backgroundColor: '#128c7e',
+													background: 'linear-gradient(135deg, #008c7a 0%, #00756a 100%)',
+													transform: 'scale(1.05) translateY(-2px)',
+													boxShadow: '0 6px 20px rgba(0,168,132,0.4)',
+												},
+												'&:active': {
+													transform: 'scale(0.95)',
 												},
 											}}
 										>
@@ -1667,40 +1931,59 @@ const Chat = () => {
 							justifyContent: 'center',
 							alignItems: 'center',
 							height: '100%',
-							backgroundColor: '#f0f2f5',
-							backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23e9edef\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
+							backgroundColor: '#0b141a',
+							backgroundImage: 'url("data:image/svg+xml,%3csvg width=\'100%25\' height=\'100%25\' xmlns=\'http://www.w3.org/2000/svg\'%3e%3crect width=\'100%25\' height=\'100%25\' fill=\'none\' stroke=\'%23182229\' stroke-width=\'1\' stroke-dasharray=\'6%2c 14\' stroke-dashoffset=\'0\' stroke-linecap=\'square\'/%3e%3c/svg%3e")',
 							p: 4,
 						}}
 					>
 						<Box sx={{ 
-							backgroundColor: '#008069',
+							background: 'linear-gradient(135deg, #00a884 0%, #008c7a 100%)',
 							borderRadius: '50%',
-							width: 80,
-							height: 80,
+							width: 120,
+							height: 120,
 							display: 'flex',
 							alignItems: 'center',
 							justifyContent: 'center',
-							mb: 3,
+							mb: 5,
+							boxShadow: '0 8px 32px rgba(0,168,132,0.4), 0 4px 16px rgba(0,168,132,0.2)',
+							border: '4px solid rgba(0,168,132,0.2)',
+							position: 'relative',
+							'&::before': {
+								content: '""',
+								position: 'absolute',
+								inset: -2,
+								borderRadius: '50%',
+								padding: '2px',
+								background: 'linear-gradient(135deg, #00a884, #008c7a, #00a884)',
+								mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+								maskComposite: 'exclude',
+							}
 						}}>
-							<Typography variant="h3" sx={{ color: 'white', fontWeight: 'bold' }}>
+							<Typography variant="h1" sx={{ 
+								color: 'white', 
+								fontWeight: 600,
+								fontSize: '3rem',
+								filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
+							}}>
 								💬
 							</Typography>
 						</Box>
-						<Typography variant="h5" sx={{ 
-							color: '#41525d',
-							fontWeight: '300',
-							mb: 1,
+						<Typography variant="h4" sx={{ 
+							color: '#e9edef',
+							fontWeight: 400,
+							mb: 2,
 							textAlign: 'center'
 						}}>
-							Chat App
+							Cinnova Chat
 						</Typography>
 						<Typography variant="body1" sx={{ 
-							color: '#667781',
+							color: '#8696a0',
 							textAlign: 'center',
-							maxWidth: 400,
-							lineHeight: 1.5
+							maxWidth: 450,
+							lineHeight: 1.6,
+							fontSize: '0.95rem'
 						}}>
-							
+							Connect with your team and clients seamlessly. Experience real-time messaging with modern features and professional design.
 						</Typography>
 					</Box>
 				)}
