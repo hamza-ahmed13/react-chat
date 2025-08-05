@@ -11,8 +11,35 @@ import {
 	Box,
 	Alert,
 	CircularProgress,
+	IconButton,
+	InputAdornment,
 } from '@mui/material';
+import { Visibility, VisibilityOff } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
+
+// WhatsApp Dark Theme Colors (matching Chat.js)
+const WHATSAPP_COLORS = {
+	primary: '#00a884', // WhatsApp green
+	primaryDark: '#008069',
+	secondary: '#25d366',
+	background: '#0b141a', // Dark background
+	surface: '#202c33', // Chat surface
+	surfaceVariant: '#2a3942',
+	onSurface: '#e9edef',
+	onSurfaceVariant: '#8696a0',
+	outgoingMessage: '#005c4b', // Outgoing message bubble
+	incomingMessage: '#202c33', // Incoming message bubble
+	divider: '#8696a026',
+	online: '#00d448',
+	error: '#f15c6d',
+	// Additional dark theme colors
+	messageHover: '#2a3942',
+	inputBackground: '#2a3942',
+	headerBackground: '#202c33',
+	sidebarBackground: '#111b21',
+	chatBackground: '#0b141a',
+	messageBorder: '#ffffff12',
+};
 
 const Login = () => {
 	const [formData, setFormData] = useState({
@@ -26,6 +53,8 @@ const Login = () => {
 	const [isSignUp, setIsSignUp] = useState(false);
 	const [error, setError] = useState('');
 	const [isLoading, setIsLoading] = useState(false);
+	const [showPassword, setShowPassword] = useState(false);
+	const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 	const navigate = useNavigate();
 	const { auth, db } = useFirebase();
 
@@ -50,14 +79,14 @@ const Login = () => {
 				return 'Please enter a valid 10-digit phone number';
 		}
 		if (!formData.email.trim()) return 'Email is required';
-		if (!formData.password) return 'Password is required';
+		if (!formData.password.trim()) return 'Password is required';
+		if (!/\S+@\S+\.\S+/.test(formData.email))
+			return 'Please enter a valid email';
 		return null;
 	};
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
-		setError('');
-
 		const validationError = validateForm();
 		if (validationError) {
 			setError(validationError);
@@ -65,10 +94,11 @@ const Login = () => {
 		}
 
 		setIsLoading(true);
+		setError('');
 
 		try {
 			if (isSignUp) {
-				// Backend signup
+				// Backend signup first (keeping the working approach)
 				const response = await fetch('http://localhost:8000/api/users/signup', {
 					method: 'POST',
 					headers: {
@@ -89,7 +119,7 @@ const Login = () => {
 					throw new Error(data.message || 'Signup failed');
 				}
 
-				// Sign in with Firebase using the token from backend
+				// Sign in with Firebase using the credentials
 				await signInWithEmailAndPassword(auth, formData.email, formData.password);
 				
 				// Create user document in Firestore
@@ -100,187 +130,462 @@ const Login = () => {
 					phone: formData.phone,
 					createdAt: new Date().toISOString(),
 				});
+
+				navigate('/chat');
 			} else {
-				// Frontend login
-				await signInWithEmailAndPassword(auth, formData.email, formData.password);
+				// Sign in existing user
+				await signInWithEmailAndPassword(
+					auth,
+					formData.email,
+					formData.password
+				);
+				navigate('/chat');
 			}
-			navigate('/chat');
-		} catch (err) {
-			console.error('Auth error:', err);
-			setError(err.message);
+		} catch (error) {
+			console.error('Authentication error:', error);
+			setError(error.message || 'An error occurred. Please try again.');
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
+	const toggleMode = () => {
+		setIsSignUp(!isSignUp);
+		setError('');
+		setFormData({
+			email: '',
+			password: '',
+			confirmPassword: '',
+			firstName: '',
+			lastName: '',
+			phone: '',
+		});
+	};
+
 	return (
-		<Container component="main" maxWidth="xs">
-			<Box
-				sx={{
-					marginTop: 8,
-					display: 'flex',
-					flexDirection: 'column',
-					alignItems: 'center',
-				}}
-			>
+		<Box
+			sx={{
+				minHeight: '100vh',
+				bgcolor: WHATSAPP_COLORS.background,
+				backgroundImage: `url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill-opacity='0.02'%3E%3Cpath d='M50 50c0-27.614 22.386-50 50-50s50 22.386 50 50-22.386 50-50 50-50-22.386-50-50zm25 0c0-13.807 11.193-25 25-25s25 11.193 25 25-11.193 25-25 25-25-11.193-25-25z' fill='%23ffffff'/%3E%3C/g%3E%3C/svg%3E")`,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				p: 2,
+			}}
+		>
+			<Container maxWidth="sm">
 				<Paper
-					elevation={3}
+					elevation={8}
 					sx={{
-						padding: 4,
-						display: 'flex',
-						flexDirection: 'column',
-						alignItems: 'center',
-						width: '100%',
+						p: 4,
+						bgcolor: WHATSAPP_COLORS.surface,
+						borderRadius: 3,
+						border: `1px solid ${WHATSAPP_COLORS.divider}`,
+						boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
 					}}
 				>
-					<Typography component="h1" variant="h5">
-						{isSignUp ? 'Create Account' : 'Welcome Back'}
-					</Typography>
+					{/* Header */}
+					<Box sx={{ textAlign: 'center', mb: 4 }}>
+						<Box
+							sx={{
+								width: 80,
+								height: 80,
+								borderRadius: '50%',
+								bgcolor: WHATSAPP_COLORS.primary,
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								mx: 'auto',
+								mb: 2,
+								border: `3px solid ${WHATSAPP_COLORS.primary}30`,
+							}}
+						>
+							<Typography
+								variant="h3"
+								sx={{ color: 'white', fontWeight: 'bold' }}
+							>
+								💬
+							</Typography>
+						</Box>
+						<Typography
+							variant="h4"
+							sx={{
+								color: WHATSAPP_COLORS.onSurface,
+								fontWeight: 300,
+								mb: 1,
+							}}
+						>
+							Welcome to Cinnova Chat
+						</Typography>
+						<Typography
+							sx={{
+								color: WHATSAPP_COLORS.onSurfaceVariant,
+								fontSize: '16px',
+							}}
+						>
+							{isSignUp ? 'Create your account' : 'Sign in to continue'}
+						</Typography>
+					</Box>
 
 					{error && (
-						<Alert severity="error" sx={{ mt: 2, width: '100%' }}>
+						<Alert
+							severity="error"
+							sx={{
+								mb: 3,
+								bgcolor: `${WHATSAPP_COLORS.error}15`,
+								color: WHATSAPP_COLORS.error,
+								border: `1px solid ${WHATSAPP_COLORS.error}30`,
+								'& .MuiAlert-icon': {
+									color: WHATSAPP_COLORS.error,
+								},
+							}}
+						>
 							{error}
 						</Alert>
 					)}
 
-					<Box
-						component="form"
-						onSubmit={handleSubmit}
-						sx={{ mt: 3, width: '100%' }}
-					>
+					<Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
 						{isSignUp && (
 							<>
-							<TextField
-										required
-										margin="normal"
-										fullWidth
-										label="First Name"
-										name="firstName"
-										value={formData.firstName}
-										onChange={handleChange}
-										disabled={isLoading}
-									/>
-								
-									<TextField
-										required
-										fullWidth
-										margin="normal"
-										label="Last Name"
-										name="lastName"
-										value={formData.lastName}
-										onChange={handleChange}
-										disabled={isLoading}
-									/>
-								
-									<TextField
-										required
-										margin="normal"
-										fullWidth
-										label="Phone Number"
-										name="phone"
-										value={formData.phone}
-										onChange={handleChange}
-										disabled={isLoading}
-										placeholder="1234567890"
-									/></>
-									
-								
+								<TextField
+									fullWidth
+									label="First Name"
+									name="firstName"
+									value={formData.firstName}
+									onChange={handleChange}
+									margin="normal"
+									required
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											bgcolor: WHATSAPP_COLORS.inputBackground,
+											borderRadius: '8px',
+											'& fieldset': {
+												borderColor: WHATSAPP_COLORS.divider,
+											},
+											'&:hover fieldset': {
+												borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+											},
+											'&.Mui-focused fieldset': {
+												borderColor: WHATSAPP_COLORS.primary,
+											},
+											'&:-webkit-autofill': {
+												bgcolor: 'transparent !important',
+											},
+										},
+										'& .MuiInputBase-input': {
+											color: WHATSAPP_COLORS.onSurface,
+											'&:-webkit-autofill': {
+												WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+												WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+											},
+										},
+										'& .MuiInputLabel-root': {
+											color: WHATSAPP_COLORS.onSurfaceVariant,
+											'&.Mui-focused': {
+												color: WHATSAPP_COLORS.primary,
+											},
+										},
+									}}
+								/>
+								<TextField
+									fullWidth
+									label="Last Name"
+									name="lastName"
+									value={formData.lastName}
+									onChange={handleChange}
+									margin="normal"
+									required
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											bgcolor: WHATSAPP_COLORS.inputBackground,
+											borderRadius: '8px',
+											'& fieldset': {
+												borderColor: WHATSAPP_COLORS.divider,
+											},
+											'&:hover fieldset': {
+												borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+											},
+											'&.Mui-focused fieldset': {
+												borderColor: WHATSAPP_COLORS.primary,
+											},
+											'&:-webkit-autofill': {
+												bgcolor: 'transparent !important',
+											},
+										},
+										'& .MuiInputBase-input': {
+											color: WHATSAPP_COLORS.onSurface,
+											'&:-webkit-autofill': {
+												WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+												WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+											},
+										},
+										'& .MuiInputLabel-root': {
+											color: WHATSAPP_COLORS.onSurfaceVariant,
+											'&.Mui-focused': {
+												color: WHATSAPP_COLORS.primary,
+											},
+										},
+									}}
+								/>
+								<TextField
+									fullWidth
+									label="Phone Number"
+									name="phone"
+									value={formData.phone}
+									onChange={handleChange}
+									margin="normal"
+									required
+									type="tel"
+									placeholder="1234567890"
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											bgcolor: WHATSAPP_COLORS.inputBackground,
+											borderRadius: '8px',
+											'& fieldset': {
+												borderColor: WHATSAPP_COLORS.divider,
+											},
+											'&:hover fieldset': {
+												borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+											},
+											'&.Mui-focused fieldset': {
+												borderColor: WHATSAPP_COLORS.primary,
+											},
+											'&:-webkit-autofill': {
+												bgcolor: 'transparent !important',
+											},
+										},
+										'& .MuiInputBase-input': {
+											color: WHATSAPP_COLORS.onSurface,
+											'&:-webkit-autofill': {
+												WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+												WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+											},
+										},
+										'& .MuiInputLabel-root': {
+											color: WHATSAPP_COLORS.onSurfaceVariant,
+											'&.Mui-focused': {
+												color: WHATSAPP_COLORS.primary,
+											},
+										},
+									}}
+								/>
+							</>
 						)}
+
 						<TextField
-							margin="normal"
-							required
 							fullWidth
-							label="Email Address"
+							label="Email"
 							name="email"
 							type="email"
 							value={formData.email}
 							onChange={handleChange}
-							autoComplete="email"
-							autoFocus
-							disabled={isLoading}
-						/>
-						<TextField
 							margin="normal"
 							required
+							sx={{
+								'& .MuiOutlinedInput-root': {
+									bgcolor: WHATSAPP_COLORS.inputBackground,
+									borderRadius: '8px',
+									'& fieldset': {
+										borderColor: WHATSAPP_COLORS.divider,
+									},
+									'&:hover fieldset': {
+										borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+									},
+									'&.Mui-focused fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+									'&:-webkit-autofill': {
+										bgcolor: 'transparent !important',
+									},
+								},
+								'& .MuiInputBase-input': {
+									color: WHATSAPP_COLORS.onSurface,
+									'&:-webkit-autofill': {
+										WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+										WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+									},
+								},
+								'& .MuiInputLabel-root': {
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									'&.Mui-focused': {
+										color: WHATSAPP_COLORS.primary,
+									},
+								},
+							}}
+						/>
+
+						<TextField
 							fullWidth
 							label="Password"
 							name="password"
-							type="password"
+							type={showPassword ? 'text' : 'password'}
 							value={formData.password}
 							onChange={handleChange}
-							autoComplete="new-password"
-							disabled={isLoading}
+							margin="normal"
+							required
+							sx={{
+								'& .MuiOutlinedInput-root': {
+									bgcolor: WHATSAPP_COLORS.inputBackground,
+									borderRadius: '8px',
+									'& fieldset': {
+										borderColor: WHATSAPP_COLORS.divider,
+									},
+									'&:hover fieldset': {
+										borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+									},
+									'&.Mui-focused fieldset': {
+										borderColor: WHATSAPP_COLORS.primary,
+									},
+									'&:-webkit-autofill': {
+										bgcolor: 'transparent !important',
+									},
+								},
+								'& .MuiInputBase-input': {
+									color: WHATSAPP_COLORS.onSurface,
+									'&:-webkit-autofill': {
+										WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+										WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+									},
+								},
+								'& .MuiInputLabel-root': {
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+									'&.Mui-focused': {
+										color: WHATSAPP_COLORS.primary,
+									},
+								},
+							}}
+							InputProps={{
+								endAdornment: (
+									<InputAdornment position="end">
+										<IconButton
+											onClick={() => setShowPassword(!showPassword)}
+											edge="end"
+											sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+										>
+											{showPassword ? <VisibilityOff /> : <Visibility />}
+										</IconButton>
+									</InputAdornment>
+								),
+							}}
 						/>
+
 						{isSignUp && (
 							<TextField
-								margin="normal"
-								required
 								fullWidth
 								label="Confirm Password"
 								name="confirmPassword"
-								type="password"
+								type={showConfirmPassword ? 'text' : 'password'}
 								value={formData.confirmPassword}
 								onChange={handleChange}
-								autoComplete="new-password"
-								disabled={isLoading}
+								margin="normal"
+								required
+								sx={{
+									'& .MuiOutlinedInput-root': {
+										bgcolor: WHATSAPP_COLORS.inputBackground,
+										borderRadius: '8px',
+										'& fieldset': {
+											borderColor: WHATSAPP_COLORS.divider,
+										},
+										'&:hover fieldset': {
+											borderColor: WHATSAPP_COLORS.onSurfaceVariant,
+										},
+										'&.Mui-focused fieldset': {
+											borderColor: WHATSAPP_COLORS.primary,
+										},
+										'&:-webkit-autofill': {
+											bgcolor: 'transparent !important',
+										},
+									},
+									'& .MuiInputBase-input': {
+										color: WHATSAPP_COLORS.onSurface,
+										'&:-webkit-autofill': {
+											WebkitBoxShadow: `0 0 0 1000px ${WHATSAPP_COLORS.inputBackground} inset`,
+											WebkitTextFillColor: WHATSAPP_COLORS.onSurface,
+										},
+									},
+									'& .MuiInputLabel-root': {
+										color: WHATSAPP_COLORS.onSurfaceVariant,
+										'&.Mui-focused': {
+											color: WHATSAPP_COLORS.primary,
+										},
+									},
+								}}
+								InputProps={{
+									endAdornment: (
+										<InputAdornment position="end">
+											<IconButton
+												onClick={() =>
+													setShowConfirmPassword(!showConfirmPassword)
+												}
+												edge="end"
+												sx={{ color: WHATSAPP_COLORS.onSurfaceVariant }}
+											>
+												{showConfirmPassword ? (
+													<VisibilityOff />
+												) : (
+													<Visibility />
+												)}
+											</IconButton>
+										</InputAdornment>
+									),
+								}}
 							/>
 						)}
+
 						<Button
 							type="submit"
 							fullWidth
 							variant="contained"
+							disabled={isLoading}
 							sx={{
 								mt: 3,
 								mb: 2,
 								height: 48,
-								position: 'relative',
+								borderRadius: '8px',
+								bgcolor: WHATSAPP_COLORS.primary,
+								fontSize: '16px',
+								fontWeight: 600,
+								textTransform: 'none',
+								'&:hover': {
+									bgcolor: WHATSAPP_COLORS.primaryDark,
+								},
+								'&:disabled': {
+									bgcolor: WHATSAPP_COLORS.surfaceVariant,
+									color: WHATSAPP_COLORS.onSurfaceVariant,
+								},
 							}}
-							disabled={isLoading}
 						>
 							{isLoading ? (
-								<CircularProgress
-									size={24}
-									sx={{
-										position: 'absolute',
-										top: '50%',
-										left: '50%',
-										marginTop: '-12px',
-										marginLeft: '-12px',
-									}}
-								/>
+								<CircularProgress size={24} sx={{ color: 'white' }} />
 							) : isSignUp ? (
-								'Sign Up'
+								'Create Account'
 							) : (
 								'Sign In'
 							)}
 						</Button>
-						<Button
-							fullWidth
-							variant="text"
-							onClick={() => {
-								if (!isLoading) {
-									setIsSignUp(!isSignUp);
-									setError('');
-									setFormData({
-										email: '',
-										password: '',
-										confirmPassword: '',
-										firstName: '',
-										lastName: '',
-										phone: '',
-									});
-								}
-							}}
-							disabled={isLoading}
-						>
-							{isSignUp
-								? 'Already have an account? Sign In'
-								: "Don't have an account? Sign Up"}
-						</Button>
+
+						<Box sx={{ textAlign: 'center' }}>
+							<Button
+								onClick={toggleMode}
+								sx={{
+									color: WHATSAPP_COLORS.primary,
+									textTransform: 'none',
+									fontSize: '14px',
+									'&:hover': {
+										bgcolor: `${WHATSAPP_COLORS.primary}10`,
+									},
+								}}
+							>
+								{isSignUp
+									? 'Already have an account? Sign In'
+									: "Don't have an account? Sign Up"}
+							</Button>
+						</Box>
 					</Box>
 				</Paper>
-			</Box>
-		</Container>
+			</Container>
+		</Box>
 	);
 };
 
