@@ -98,11 +98,15 @@ const Chat = () => {
 	const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
 	const [previewFile, setPreviewFile] = useState(null);
 	const [previewOpen, setPreviewOpen] = useState(false);
+	const [isRecording, setIsRecording] = useState(false);
+	const [mediaRecorder, setMediaRecorder] = useState(null);
+	const [recordingTime, setRecordingTime] = useState(0);
 
 	const messagesEndRef = useRef(null);
 	const messageInputRef = useRef(null);
 	const typingTimeoutRef = useRef(null);
 	const attachmentMenuRef = useRef(null);
+	const recordingTimerRef = useRef(null);
 	const navigate = useNavigate();
 	const { auth } = useFirebase();
 
@@ -490,6 +494,18 @@ const Chat = () => {
 		};
 	}, [showAttachmentMenu]);
 
+	// Cleanup recording on component unmount
+	useEffect(() => {
+		return () => {
+			if (recordingTimerRef.current) {
+				clearInterval(recordingTimerRef.current);
+			}
+			if (mediaRecorder && isRecording) {
+				mediaRecorder.stream.getTracks().forEach(track => track.stop());
+			}
+		};
+	}, [mediaRecorder, isRecording]);
+
 	const fetchMessages = React.useCallback(async () => {
 		if (!selectedChat) return;
 
@@ -666,6 +682,65 @@ const Chat = () => {
 		input.onchange = handleFileSelect;
 		input.click();
 		setShowAttachmentMenu(false);
+	};
+
+	const startRecording = async () => {
+		try {
+			const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+			const recorder = new MediaRecorder(stream);
+			const chunks = [];
+
+			recorder.ondataavailable = (e) => {
+				if (e.data.size > 0) {
+					chunks.push(e.data);
+				}
+			};
+
+			recorder.onstop = () => {
+				const blob = new Blob(chunks, { type: 'audio/webm' });
+				const file = new File([blob], `audio-${Date.now()}.webm`, { type: 'audio/webm' });
+				handleSendFile(file);
+				
+				// Stop all tracks
+				stream.getTracks().forEach(track => track.stop());
+			};
+
+			setMediaRecorder(recorder);
+			setIsRecording(true);
+			setRecordingTime(0);
+			recorder.start();
+
+			// Start timer
+			recordingTimerRef.current = setInterval(() => {
+				setRecordingTime(prev => prev + 1);
+			}, 1000);
+
+		} catch (error) {
+			console.error('Error starting recording:', error);
+			setSnackbar({ open: true, message: 'Could not access microphone', severity: 'error' });
+		}
+	};
+
+	const stopRecording = () => {
+		if (mediaRecorder && isRecording) {
+			mediaRecorder.stop();
+			setIsRecording(false);
+			setRecordingTime(0);
+			if (recordingTimerRef.current) {
+				clearInterval(recordingTimerRef.current);
+			}
+		}
+	};
+
+	const cancelRecording = () => {
+		if (mediaRecorder && isRecording) {
+			mediaRecorder.stream.getTracks().forEach(track => track.stop());
+			setIsRecording(false);
+			setRecordingTime(0);
+			if (recordingTimerRef.current) {
+				clearInterval(recordingTimerRef.current);
+			}
+		}
 	};
 
 	const handleCameraSelect = () => {
@@ -1383,6 +1458,23 @@ const Chat = () => {
 													<FolderIcon sx={{ color: '#3b82f6', mr: 2 }} />
 													<Typography variant="body2">Document</Typography>
 												</Box>
+												<Box
+													sx={{
+														display: 'flex',
+														alignItems: 'center',
+														p: 1,
+														borderRadius: '4px',
+														cursor: 'pointer',
+														'&:hover': { backgroundColor: '#f5f5f5' },
+													}}
+													onClick={() => {
+														startRecording();
+														setShowAttachmentMenu(false);
+													}}
+												>
+													<MicIcon sx={{ color: '#ff6b35', mr: 2 }} />
+													<Typography variant="body2">Audio</Typography>
+												</Box>
 											</Box>
 										</Box>
 									)}
@@ -1404,70 +1496,114 @@ const Chat = () => {
 											/>
 										</Box>
 									)}
-									<TextField
-										fullWidth
-										value={message}
-										onChange={handleMessageChange}
-										placeholder="Type a message"
-										variant="outlined"
-										size="small"
-										inputRef={messageInputRef}
-										multiline
-										maxRows={4}
-										sx={{
-											'& .MuiOutlinedInput-root': {
+									{isRecording ? (
+										<Box
+											sx={{
+												display: 'flex',
+												alignItems: 'center',
+												backgroundColor: '#fff3cd',
 												borderRadius: '24px',
-												backgroundColor: '#ffffff',
-												fontSize: '0.9rem',
-												'& fieldset': {
-													borderColor: 'transparent',
-												},
-												'&:hover fieldset': {
-													borderColor: 'transparent',
-												},
-												'&.Mui-focused fieldset': {
-													borderColor: 'transparent',
-												},
-											},
-											'& .MuiInputBase-input': {
-												py: 1.25,
 												px: 2,
-											},
-										}}
-										onKeyPress={(e) => {
-											if (e.key === 'Enter' && !e.shiftKey) {
-												e.preventDefault();
-												handleSendMessage(e);
-											}
-										}}
-									/>
-								</Box>
-								<IconButton
-									type="submit"
-									disabled={!message.trim() || isUploading}
-									sx={{
-										backgroundColor: (message.trim() && !isUploading) ? '#008069' : '#54656f',
-										color: 'white',
-										width: 40,
-										height: 40,
-										mb: 0.5,
-										'&:hover': {
-											backgroundColor: (message.trim() && !isUploading) ? '#006a56' : '#54656f',
-										},
-										'&:disabled': {
-											backgroundColor: '#54656f',
-											color: 'rgba(255,255,255,0.5)',
-										},
-									}}
-								>
-									{isUploading ? (
-										<CircularProgress size={20} sx={{ color: 'white' }} />
-									) : message.trim() ? (
-										<SendIcon />
+												py: 1,
+												border: '1px solid #ffeaa7',
+											}}
+										>
+											<MicIcon sx={{ color: '#e74c3c', mr: 1, fontSize: '1.2rem' }} />
+											<Typography variant="body2" sx={{ flexGrow: 1, color: '#856404' }}>
+												Recording... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+											</Typography>
+											<IconButton size="small" onClick={cancelRecording} sx={{ color: '#dc3545', mr: 1 }}>
+												<CloseIcon fontSize="small" />
+											</IconButton>
+											<IconButton size="small" onClick={stopRecording} sx={{ color: '#28a745' }}>
+												<SendIcon fontSize="small" />
+											</IconButton>
+										</Box>
 									) : (
-										<MicIcon />
+										<TextField
+											fullWidth
+											value={message}
+											onChange={handleMessageChange}
+											placeholder="Type a message"
+											variant="outlined"
+											size="small"
+											inputRef={messageInputRef}
+											multiline
+											maxRows={4}
+											sx={{
+												'& .MuiOutlinedInput-root': {
+													borderRadius: '24px',
+													backgroundColor: '#ffffff',
+													fontSize: '0.9rem',
+													'& fieldset': {
+														borderColor: 'transparent',
+													},
+													'&:hover fieldset': {
+														borderColor: 'transparent',
+													},
+													'&.Mui-focused fieldset': {
+														borderColor: 'transparent',
+													},
+												},
+												'& .MuiInputBase-input': {
+													py: 1.25,
+													px: 2,
+												},
+											}}
+											onKeyPress={(e) => {
+												if (e.key === 'Enter' && !e.shiftKey) {
+													e.preventDefault();
+													handleSendMessage(e);
+												}
+											}}
+										/>
 									)}
-								</IconButton>
+								</Box>
+								{!isRecording && (
+									message.trim() ? (
+										<IconButton
+											type="submit"
+											disabled={isUploading}
+											sx={{
+												backgroundColor: '#008069',
+												color: 'white',
+												width: 40,
+												height: 40,
+												mb: 0.5,
+												'&:hover': {
+													backgroundColor: '#006a56',
+												},
+												'&:disabled': {
+													backgroundColor: '#54656f',
+													color: 'rgba(255,255,255,0.5)',
+												},
+											}}
+											onClick={handleSendMessage}
+										>
+											{isUploading ? (
+												<CircularProgress size={20} sx={{ color: 'white' }} />
+											) : (
+												<SendIcon />
+											)}
+										</IconButton>
+									) : (
+										<IconButton
+											onClick={startRecording}
+											sx={{
+												backgroundColor: '#54656f',
+												color: 'white',
+												width: 40,
+												height: 40,
+												mb: 0.5,
+												'&:hover': {
+													backgroundColor: '#008069',
+												},
+											}}
+										>
+											<MicIcon />
+										</IconButton>
+									)
+								)}
 							</Box>
 						</Paper>
 					</>
