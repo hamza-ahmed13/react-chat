@@ -45,6 +45,7 @@ import {
 	KeyboardArrowDown as ArrowDownIcon,
 	Group as GroupIcon,
 	Add as AddIcon,
+	Info as InfoIcon,
 } from '@mui/icons-material';
 import { useFirebase } from '../contexts/FirebaseContext';
 import GroupCreation from './GroupCreation';
@@ -136,6 +137,12 @@ const Chat = () => {
 	const [cameraStream, setCameraStream] = useState(null);
 	const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 	const [showGroupCreation, setShowGroupCreation] = useState(false);
+	const [showGroupInfo, setShowGroupInfo] = useState(false);
+	const [groupMembers, setGroupMembers] = useState([]);
+	const [loadingMembers, setLoadingMembers] = useState(false);
+	const [showAddMember, setShowAddMember] = useState(false);
+	const [availableUsers, setAvailableUsers] = useState([]);
+	const [selectedNewMembers, setSelectedNewMembers] = useState([]);
 
 	const messagesEndRef = useRef(null);
 	const messagesContainerRef = useRef(null);
@@ -148,15 +155,29 @@ const Chat = () => {
 	const navigate = useNavigate();
 	const { auth } = useFirebase();
 
-	const filteredUsers = users.filter(
-		(user) =>
-			user.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
-	);
+	const filteredUsers = users
+		.filter(
+			(user) =>
+				user.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+				user.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
+		)
+		.sort((a, b) => {
+			// Sort by most recent message timestamp
+			const aTime = a.lastMessage?.timestamp ? new Date(a.lastMessage.timestamp).getTime() : 0;
+			const bTime = b.lastMessage?.timestamp ? new Date(b.lastMessage.timestamp).getTime() : 0;
+			return bTime - aTime; // Most recent first
+		});
 
-	const filteredGroups = groups.filter(group =>
-		group.name?.toLowerCase().includes(searchQuery.toLowerCase())
-	);
+	const filteredGroups = groups
+		.filter(group =>
+			group.name?.toLowerCase().includes(searchQuery.toLowerCase())
+		)
+		.sort((a, b) => {
+			// Sort by most recent message timestamp
+			const aTime = a.lastMessage?.timestamp ? new Date(a.lastMessage.timestamp).getTime() : 0;
+			const bTime = b.lastMessage?.timestamp ? new Date(b.lastMessage.timestamp).getTime() : 0;
+			return bTime - aTime; // Most recent first
+		});
 
 	const fetchUsers = useCallback(async () => {
 			if (!auth.currentUser) {
@@ -306,6 +327,210 @@ const Chat = () => {
 			setGroups([]);
 		}
 	}, [auth.currentUser]);
+
+	const fetchGroupMembers = useCallback(async (groupId) => {
+		if (!groupId) return;
+
+		try {
+			setLoadingMembers(true);
+			console.log('Fetching members for group:', groupId);
+			
+			const response = await fetch(`http://localhost:8000/api/groups/${groupId}`, {
+				headers: {
+					'ngrok-skip-browser-warning': 'true',
+				},
+			});
+			
+			const data = await response.json();
+			console.log('Group details response:', data);
+
+			if (response.ok && data.status && data.data) {
+				setGroupMembers(data.data.members || []);
+				console.log('Group members loaded:', data.data.members?.length || 0);
+			} else {
+				console.error('Failed to fetch group members:', data.message);
+				setGroupMembers([]);
+			}
+		} catch (error) {
+			console.error('Error fetching group members:', error);
+			setGroupMembers([]);
+		} finally {
+			setLoadingMembers(false);
+		}
+	}, []);
+
+	const handleRemoveMember = async (memberUserId) => {
+		if (!selectedChat?.id || !memberUserId || !auth.currentUser) return;
+
+		try {
+			console.log('Removing member:', memberUserId, 'from group:', selectedChat.id);
+			
+			const response = await fetch(
+				`http://localhost:8000/api/groups/${selectedChat.id}/members/${memberUserId}`,
+				{
+					method: 'DELETE',
+					headers: {
+						'Content-Type': 'application/json',
+						'ngrok-skip-browser-warning': 'true',
+					},
+					body: JSON.stringify({
+						requesterId: auth.currentUser.uid
+					})
+				}
+			);
+
+			const data = await response.json();
+			console.log('Remove member response:', data);
+
+			if (response.ok && data.status) {
+				setSnackbar({
+					open: true,
+					message: 'Member removed successfully',
+					severity: 'success'
+				});
+				// Refresh the members list
+				fetchGroupMembers(selectedChat.id);
+				// Refresh groups list to update member count
+				fetchGroups();
+			} else {
+				setSnackbar({
+					open: true,
+					message: data.message || 'Failed to remove member',
+					severity: 'error'
+				});
+			}
+		} catch (error) {
+			console.error('Error removing member:', error);
+			setSnackbar({
+				open: true,
+				message: 'Failed to remove member',
+				severity: 'error'
+			});
+		}
+	};
+
+	const handleAddMember = async () => {
+		setShowAddMember(true);
+		await fetchAvailableUsers();
+	};
+
+	const fetchAvailableUsers = async () => {
+		if (!auth.currentUser || !selectedChat?.id) return;
+
+		try {
+			console.log('Fetching available users for group:', selectedChat.id);
+			
+			// Get all users
+			const response = await fetch(
+				`http://localhost:8000/api/chat/users/${auth.currentUser.uid}`,
+				{
+					headers: {
+						'ngrok-skip-browser-warning': 'true',
+					},
+				}
+			);
+
+			const data = await response.json();
+			console.log('All users response:', data);
+
+			if (response.ok && data.status && Array.isArray(data.data)) {
+				// Filter out users who are already members
+				const currentMemberIds = groupMembers.map(member => member.user.firebase_uid);
+				const availableUsersFiltered = data.data.filter(user => 
+					!currentMemberIds.includes(user.firebase_uid)
+				);
+				
+				setAvailableUsers(availableUsersFiltered);
+				console.log('Available users to add:', availableUsersFiltered.length);
+			} else {
+				console.error('Failed to fetch users:', data.message);
+				setAvailableUsers([]);
+			}
+		} catch (error) {
+			console.error('Error fetching available users:', error);
+			setAvailableUsers([]);
+		}
+	};
+
+	const handleAddSelectedMembers = async () => {
+		if (!selectedChat?.id || selectedNewMembers.length === 0 || !auth.currentUser) return;
+
+		try {
+			console.log('Adding members:', selectedNewMembers, 'to group:', selectedChat.id);
+			
+			let successCount = 0;
+			let errors = [];
+
+			// Add members one by one
+			for (const userId of selectedNewMembers) {
+				try {
+					const response = await fetch(
+						`http://localhost:8000/api/groups/${selectedChat.id}/members`,
+						{
+							method: 'POST',
+							headers: {
+								'Content-Type': 'application/json',
+								'ngrok-skip-browser-warning': 'true',
+							},
+							body: JSON.stringify({
+								userId: userId,
+								requesterId: auth.currentUser.uid
+							})
+						}
+					);
+
+					const data = await response.json();
+					console.log(`Add member ${userId} response:`, data);
+
+					if (response.ok && data.status) {
+						successCount++;
+					} else {
+						errors.push(data.message || `Failed to add user ${userId}`);
+					}
+				} catch (error) {
+					console.error(`Error adding member ${userId}:`, error);
+					errors.push(`Failed to add user ${userId}`);
+				}
+			}
+
+			// Show appropriate message
+			if (successCount === selectedNewMembers.length) {
+				setSnackbar({
+					open: true,
+					message: `${successCount} member(s) added successfully`,
+					severity: 'success'
+				});
+			} else if (successCount > 0) {
+				setSnackbar({
+					open: true,
+					message: `${successCount} member(s) added, ${errors.length} failed`,
+					severity: 'warning'
+				});
+			} else {
+				setSnackbar({
+					open: true,
+					message: errors[0] || 'Failed to add members',
+					severity: 'error'
+				});
+			}
+			
+			// Close dialog and reset state
+			setShowAddMember(false);
+			setSelectedNewMembers([]);
+			
+			// Refresh the members list and groups
+			fetchGroupMembers(selectedChat.id);
+			fetchGroups();
+
+		} catch (error) {
+			console.error('Error adding members:', error);
+			setSnackbar({
+				open: true,
+				message: 'Failed to add members',
+				severity: 'error'
+			});
+		}
+	};
 
 	useEffect(() => {
 		fetchUsers();
@@ -1838,15 +2063,21 @@ const Chat = () => {
 							}}
 						>
 							<Avatar sx={{ 
-								bgcolor: '#00a884',
+								bgcolor: selectedChat.isGroup ? '#25d366' : '#00a884',
 								width: 45,
 								height: 45,
 								fontSize: '1.1rem',
 								fontWeight: 600,
 								color: '#ffffff'
 							}}>
-								{selectedChat.first_name?.[0]?.toUpperCase()}
-								{selectedChat.last_name?.[0]?.toUpperCase()}
+								{selectedChat.isGroup ? (
+									<GroupIcon />
+								) : (
+									<>
+										{selectedChat.first_name?.[0]?.toUpperCase()}
+										{selectedChat.last_name?.[0]?.toUpperCase()}
+									</>
+								)}
 							</Avatar>
 							<Box sx={{ flexGrow: 1 }}>
 								<Typography variant="subtitle1" sx={{ 
@@ -1854,15 +2085,34 @@ const Chat = () => {
 									color: '#e9edef',
 									fontSize: '1.1rem'
 								}}>
-									{selectedChat.first_name} {selectedChat.last_name}
+									{selectedChat.isGroup ? selectedChat.name : `${selectedChat.first_name} ${selectedChat.last_name}`}
 								</Typography>
 								<Typography variant="caption" sx={{ 
 									color: '#8696a0',
 									fontSize: '0.85rem'
 								}}>
-									online
+									{selectedChat.isGroup ? `${selectedChat.memberCount || 0} members` : 'online'}
 								</Typography>
 							</Box>
+							
+							{/* Group Info Button */}
+							{selectedChat.isGroup && (
+								<IconButton
+									onClick={() => {
+										setShowGroupInfo(true);
+										fetchGroupMembers(selectedChat.id);
+									}}
+									sx={{
+										color: '#8696a0',
+										'&:hover': {
+											color: '#e9edef',
+											backgroundColor: 'rgba(255,255,255,0.1)'
+										}
+									}}
+								>
+									<InfoIcon />
+								</IconButton>
+							)}
 
 						</Paper>
 
@@ -2525,6 +2775,279 @@ const Chat = () => {
 				onClose={() => setShowGroupCreation(false)}
 				onGroupCreated={handleGroupCreated}
 			/>
+
+			{/* Group Info Dialog */}
+			<Dialog
+				open={showGroupInfo}
+				onClose={() => setShowGroupInfo(false)}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						backgroundColor: '#202c33',
+						color: '#e9edef',
+						border: '1px solid #3b4a54',
+					}
+				}}
+			>
+				<DialogTitle sx={{ 
+					color: '#e9edef',
+					borderBottom: '1px solid #3b4a54',
+					display: 'flex',
+					alignItems: 'center',
+					gap: 2
+				}}>
+					<Avatar sx={{ 
+						bgcolor: '#25d366',
+						width: 50,
+						height: 50,
+					}}>
+						<GroupIcon />
+					</Avatar>
+					<Box>
+						<Typography variant="h6" sx={{ color: '#e9edef' }}>
+							{selectedChat?.name}
+						</Typography>
+						<Typography variant="caption" sx={{ color: '#8696a0' }}>
+							Group • {selectedChat?.memberCount || 0} members
+						</Typography>
+					</Box>
+				</DialogTitle>
+				<DialogContent sx={{ p: 0 }}>
+					{/* Group Description */}
+					{selectedChat?.description && (
+						<Box sx={{ p: 3, borderBottom: '1px solid #3b4a54' }}>
+							<Typography variant="body2" sx={{ color: '#8696a0', mb: 1 }}>
+								Description
+							</Typography>
+							<Typography variant="body1" sx={{ color: '#e9edef' }}>
+								{selectedChat.description}
+							</Typography>
+						</Box>
+					)}
+
+					{/* Group Members */}
+					<Box sx={{ p: 3 }}>
+						<Typography variant="body2" sx={{ color: '#8696a0', mb: 2 }}>
+							{selectedChat?.memberCount || 0} members
+						</Typography>
+						
+						{/* Add Member Button */}
+						<ListItem 
+							button 
+							onClick={handleAddMember}
+							sx={{
+								borderRadius: 2,
+								mb: 1,
+								'&:hover': {
+									backgroundColor: 'rgba(255,255,255,0.1)'
+								}
+							}}
+						>
+							<ListItemAvatar>
+								<Avatar sx={{ bgcolor: '#00a884' }}>
+									<AddIcon />
+								</Avatar>
+							</ListItemAvatar>
+							<ListItemText 
+								primary="Add member" 
+								primaryTypographyProps={{ color: '#e9edef' }}
+							/>
+						</ListItem>
+
+						{/* Members List */}
+						{loadingMembers ? (
+							<Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+								<CircularProgress size={24} sx={{ color: '#00a884' }} />
+							</Box>
+						) : (
+							<List sx={{ p: 0 }}>
+								{groupMembers.map((member) => (
+									<ListItem 
+										key={member.user.firebase_uid}
+										sx={{
+											borderRadius: 2,
+											mb: 0.5,
+											'&:hover': {
+												backgroundColor: 'rgba(255,255,255,0.05)'
+											}
+										}}
+									>
+										<ListItemAvatar>
+											<Avatar sx={{ 
+												bgcolor: '#00a884',
+												width: 40,
+												height: 40,
+												fontSize: '0.9rem'
+											}}>
+												{member.user.first_name?.[0]?.toUpperCase()}
+												{member.user.last_name?.[0]?.toUpperCase()}
+											</Avatar>
+										</ListItemAvatar>
+										<ListItemText 
+											primary={`${member.user.first_name} ${member.user.last_name}`}
+											secondary={member.role === 'admin' ? 'Group Admin' : 'Member'}
+											primaryTypographyProps={{ 
+												color: '#e9edef',
+												fontSize: '0.95rem'
+											}}
+											secondaryTypographyProps={{ 
+												color: member.role === 'admin' ? '#00a884' : '#8696a0',
+												fontSize: '0.8rem'
+											}}
+										/>
+										{/* Remove Member Button (only for admins and not for self) */}
+										{selectedChat?.creator_id === auth.currentUser?.uid && 
+										 member.user.firebase_uid !== auth.currentUser?.uid && (
+											<IconButton
+												size="small"
+												onClick={() => handleRemoveMember(member.user.firebase_uid)}
+												sx={{
+													color: '#f44336',
+													'&:hover': {
+														backgroundColor: 'rgba(244, 67, 54, 0.1)'
+													}
+												}}
+											>
+												<CloseIcon fontSize="small" />
+											</IconButton>
+										)}
+									</ListItem>
+								))}
+							</List>
+						)}
+					</Box>
+				</DialogContent>
+				<DialogActions sx={{ borderTop: '1px solid #3b4a54', p: 2 }}>
+					<Button 
+						onClick={() => setShowGroupInfo(false)}
+						sx={{ color: '#8696a0' }}
+					>
+						Close
+					</Button>
+				</DialogActions>
+			</Dialog>
+
+			{/* Add Member Dialog */}
+			<Dialog
+				open={showAddMember}
+				onClose={() => {
+					setShowAddMember(false);
+					setSelectedNewMembers([]);
+				}}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						backgroundColor: '#202c33',
+						color: '#e9edef',
+						border: '1px solid #3b4a54',
+					}
+				}}
+			>
+				<DialogTitle sx={{ 
+					color: '#e9edef',
+					borderBottom: '1px solid #3b4a54',
+				}}>
+					Add Members to {selectedChat?.name}
+				</DialogTitle>
+				<DialogContent sx={{ p: 3 }}>
+					<Typography variant="body2" sx={{ color: '#8696a0', mb: 2 }}>
+						Select users to add to the group:
+					</Typography>
+					
+					{/* Available Users List */}
+					<List sx={{ maxHeight: 300, overflow: 'auto' }}>
+						{availableUsers.map((user) => (
+							<ListItem 
+								key={user.firebase_uid}
+								sx={{
+									borderRadius: 2,
+									mb: 0.5,
+									'&:hover': {
+										backgroundColor: 'rgba(255,255,255,0.05)'
+									}
+								}}
+							>
+								<ListItemAvatar>
+									<Avatar sx={{ 
+										bgcolor: '#00a884',
+										width: 40,
+										height: 40,
+										fontSize: '0.9rem'
+									}}>
+										{user.first_name?.[0]?.toUpperCase()}
+										{user.last_name?.[0]?.toUpperCase()}
+									</Avatar>
+								</ListItemAvatar>
+								<ListItemText 
+									primary={`${user.first_name} ${user.last_name}`}
+									secondary={user.email}
+									primaryTypographyProps={{ 
+										color: '#e9edef',
+										fontSize: '0.95rem'
+									}}
+									secondaryTypographyProps={{ 
+										color: '#8696a0',
+										fontSize: '0.8rem'
+									}}
+								/>
+								<IconButton
+									onClick={() => {
+										if (selectedNewMembers.includes(user.firebase_uid)) {
+											setSelectedNewMembers(prev => 
+												prev.filter(id => id !== user.firebase_uid)
+											);
+										} else {
+											setSelectedNewMembers(prev => [...prev, user.firebase_uid]);
+										}
+									}}
+									sx={{
+										color: selectedNewMembers.includes(user.firebase_uid) 
+											? '#00a884' : '#8696a0',
+										'&:hover': {
+											backgroundColor: 'rgba(0,168,132,0.1)'
+										}
+									}}
+								>
+									{selectedNewMembers.includes(user.firebase_uid) ? 
+										<CloseIcon /> : <AddIcon />
+									}
+								</IconButton>
+							</ListItem>
+						))}
+					</List>
+
+					{availableUsers.length === 0 && (
+						<Typography variant="body2" sx={{ color: '#8696a0', textAlign: 'center', p: 2 }}>
+							No users available to add
+						</Typography>
+					)}
+				</DialogContent>
+				<DialogActions sx={{ borderTop: '1px solid #3b4a54', p: 2 }}>
+					<Button 
+						onClick={() => {
+							setShowAddMember(false);
+							setSelectedNewMembers([]);
+						}}
+						sx={{ color: '#8696a0' }}
+					>
+						Cancel
+					</Button>
+					<Button 
+						onClick={handleAddSelectedMembers}
+						disabled={selectedNewMembers.length === 0}
+						sx={{ 
+							color: '#00a884',
+							'&:disabled': {
+								color: '#8696a0'
+							}
+						}}
+					>
+						Add {selectedNewMembers.length} Member{selectedNewMembers.length !== 1 ? 's' : ''}
+					</Button>
+				</DialogActions>
+			</Dialog>
 		</Box>
 	);
 };
