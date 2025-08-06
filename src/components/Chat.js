@@ -765,7 +765,7 @@ const Chat = () => {
 					// Check if message already exists
 					const messageExists = prevMessages.some(msg => msg.id === newMessage.id);
 					if (messageExists) {
-						console.log('Group message already exists, updating status');
+						// console.log('Group message already exists, updating status');
 						return prevMessages.map(msg => 
 							msg.id === newMessage.id ? { ...msg, ...newMessage } : msg
 						);
