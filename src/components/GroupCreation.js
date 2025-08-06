@@ -64,7 +64,6 @@ const GroupCreation = ({ open, onClose, onGroupCreated }) => {
             const response = await fetch(`http://localhost:8000/api/chat/users/${auth.currentUser.uid}`);
             const data = await response.json();
             
-            console.log('API Response:', data);
             
             if (data.status && Array.isArray(data.data)) {
                 setAvailableUsers(data.data);
@@ -131,7 +130,6 @@ const GroupCreation = ({ open, onClose, onGroupCreated }) => {
             const data = await response.json();
 
             if (response.ok && data.status) {
-                console.log('Group created successfully:', data.data);
                 onGroupCreated(data.data);
                 handleClose();
             } else {

@@ -19,13 +19,11 @@ export const connectSocket = (userId) => {
 	});
 
 	socket.on('connect', () => {
-		console.log('Socket connected:', socket.id);
 		// Set user ID after connection
 		socket.emit('set_user_id', userId);
 	});
 
 	socket.on('disconnect', (reason) => {
-		console.log('Socket disconnected:', reason);
 	});
 
 	socket.on('connect_error', (error) => {
@@ -33,7 +31,6 @@ export const connectSocket = (userId) => {
 	});
 
 	socket.on('reconnect', (attemptNumber) => {
-		console.log('Socket reconnected after', attemptNumber, 'attempts');
 	});
 
 	socket.on('reconnect_error', (error) => {
@@ -56,13 +53,11 @@ export const disconnectSocket = () => {
 
 export const joinRoom = (roomName) => {
 	if (!socket) return;
-	console.log('Joining room:', roomName);
 	socket.emit('join_room', roomName);
 };
 
 export const leaveRoom = (roomName) => {
 	if (!socket) return;
-	console.log('Leaving room:', roomName);
 	socket.emit('leave_room', roomName);
 };
 
@@ -101,7 +96,6 @@ export const sendGroupMessage = async (messageData) => {
 			group_id: messageData.groupId
 		});
 
-		console.log('Group message sent via socket');
 		return true;
 	} catch (error) {
 		console.error('Error sending group message:', error);
@@ -138,7 +132,6 @@ export const sendFile = async (fileData) => {
 
 		// Convert file to base64
 		const base64Data = await fileToBase64(fileData.file);
-		console.log('File converted to base64, size:', base64Data.length);
 		
 		// Split large files into chunks
 		const chunkSize = 64 * 1024; // 64KB chunks
@@ -147,7 +140,6 @@ export const sendFile = async (fileData) => {
 			chunks.push(base64Data.slice(i, i + chunkSize));
 		}
 
-		console.log('File split into', chunks.length, 'chunks');
 
 		// Send file metadata first
 		socket.emit('send_file_start', {
@@ -173,7 +165,6 @@ export const sendFile = async (fileData) => {
 			});
 		});
 
-		console.log('File data sent via socket in chunks');
 		return true;
 	} catch (error) {
 		console.error('Error sending file:', error);
@@ -208,7 +199,6 @@ export const sendGroupFile = async (fileData) => {
 
 		// Convert file to base64
 		const base64Data = await fileToBase64(fileData.file);
-		console.log('Group file converted to base64, size:', base64Data.length);
 		
 		// Split large files into chunks
 		const chunkSize = 64 * 1024; // 64KB chunks
@@ -217,7 +207,6 @@ export const sendGroupFile = async (fileData) => {
 			chunks.push(base64Data.slice(i, i + chunkSize));
 		}
 
-		console.log('Group file split into', chunks.length, 'chunks');
 
 		// Send file metadata first
 		socket.emit('send_file_start', {
@@ -239,7 +228,6 @@ export const sendGroupFile = async (fileData) => {
 
 			socket.once('file_upload_ready', () => {
 				clearTimeout(timeout);
-				console.log('Server ready for group file upload');
 				
 				// Send chunks
 				chunks.forEach((chunk, index) => {
@@ -252,7 +240,6 @@ export const sendGroupFile = async (fileData) => {
 					});
 				});
 
-				console.log('All group file chunks sent');
 				resolve(true);
 			});
 

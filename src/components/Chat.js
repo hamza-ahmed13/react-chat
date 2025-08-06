@@ -188,7 +188,7 @@ const Chat = () => {
 			try {
 				setIsLoading(true);
 				setError(null);
-				console.log('Current user:', auth.currentUser.uid);
+				// console.log('Current user:', auth.currentUser.uid);
 
 				// Try to fetch users with chat history first
 				let response = await fetch(
@@ -200,7 +200,7 @@ const Chat = () => {
 					}
 				);
 				let data = await response.json();
-				console.log('Chat users response:', data);
+				// console.log('Chat users response:', data);
 
 				if (!response.ok) {
 					throw new Error(data.message || 'Failed to fetch users');
@@ -215,7 +215,7 @@ const Chat = () => {
 					data.data.length > 0 &&
 					data.data[0].user
 				) {
-					console.log('Processing new format response');
+					// console.log('Processing new format response');
 					processedUsers = data.data.map((item) => ({
 						firebase_uid: item.user.firebase_uid,
 						first_name: item.user.first_name,
@@ -237,7 +237,7 @@ const Chat = () => {
 					Array.isArray(data.data) &&
 					data.data.length > 0
 				) {
-					console.log('Processing standard format response');
+					// console.log('Processing standard format response');
 					processedUsers = data.data;
 				}
 				// If no users found with chat history, fetch all users
@@ -254,7 +254,7 @@ const Chat = () => {
 						}
 					);
 					data = await response.json();
-					console.log('All users response:', data);
+					// console.log('All users response:', data);
 
 					if (!response.ok) {
 						throw new Error(data.message || 'Failed to fetch users');
@@ -269,7 +269,7 @@ const Chat = () => {
 						}));
 				}
 
-				console.log('Processed users:', processedUsers);
+				// console.log('Processed users:', processedUsers);
 				setUsers(processedUsers);
 
 				// Join all potential chat rooms so we can receive messages in real-time
@@ -280,9 +280,9 @@ const Chat = () => {
 							auth.currentUser.uid,
 							user.firebase_uid
 						);
-						console.log(
-							`Joining room for user ${user.first_name}: ${roomName}`
-						);
+						// console.log(
+						// 	`Joining room for user ${user.first_name}: ${roomName}`
+						// );
 						socket.emit('join_room', roomName);
 					});
 				} else {
@@ -303,7 +303,7 @@ const Chat = () => {
 		}
 
 		try {
-			console.log('Fetching groups for user:', auth.currentUser.uid);
+			// console.log('Fetching groups for user:', auth.currentUser.uid);
 			const response = await fetch(
 				`http://localhost:8000/api/groups/user/${auth.currentUser.uid}`,
 				{
@@ -313,11 +313,11 @@ const Chat = () => {
 				}
 			);
 			const data = await response.json();
-			console.log('Groups response:', data);
+			// console.log('Groups response:', data);
 
 			if (response.ok && data.status && Array.isArray(data.data)) {
 				setGroups(data.data);
-				console.log('Groups loaded:', data.data.length);
+				// console.log('Groups loaded:', data.data.length);
 			} else {
 				console.error('Failed to fetch groups:', data.message);
 				setGroups([]);
@@ -333,7 +333,7 @@ const Chat = () => {
 
 		try {
 			setLoadingMembers(true);
-			console.log('Fetching members for group:', groupId);
+			// console.log('Fetching members for group:', groupId);
 			
 			const response = await fetch(`http://localhost:8000/api/groups/${groupId}`, {
 				headers: {
@@ -342,11 +342,11 @@ const Chat = () => {
 			});
 			
 			const data = await response.json();
-			console.log('Group details response:', data);
+			// console.log('Group details response:', data);
 
 			if (response.ok && data.status && data.data) {
 				setGroupMembers(data.data.members || []);
-				console.log('Group members loaded:', data.data.members?.length || 0);
+				// console.log('Group members loaded:', data.data.members?.length || 0);
 			} else {
 				console.error('Failed to fetch group members:', data.message);
 				setGroupMembers([]);
@@ -380,7 +380,7 @@ const Chat = () => {
 			);
 
 			const data = await response.json();
-			console.log('Remove member response:', data);
+			// console.log('Remove member response:', data);
 
 			if (response.ok && data.status) {
 				setSnackbar({
@@ -418,7 +418,7 @@ const Chat = () => {
 		if (!auth.currentUser || !selectedChat?.id) return;
 
 		try {
-			console.log('Fetching available users for group:', selectedChat.id);
+			// console.log('Fetching available users for group:', selectedChat.id);
 			
 			// Get all users
 			const response = await fetch(
@@ -431,7 +431,7 @@ const Chat = () => {
 			);
 
 			const data = await response.json();
-			console.log('All users response:', data);
+			// console.log('All users response:', data);
 
 			if (response.ok && data.status && Array.isArray(data.data)) {
 				// Filter out users who are already members
@@ -441,7 +441,7 @@ const Chat = () => {
 				);
 				
 				setAvailableUsers(availableUsersFiltered);
-				console.log('Available users to add:', availableUsersFiltered.length);
+				// console.log('Available users to add:', availableUsersFiltered.length);
 			} else {
 				console.error('Failed to fetch users:', data.message);
 				setAvailableUsers([]);
@@ -456,7 +456,7 @@ const Chat = () => {
 		if (!selectedChat?.id || selectedNewMembers.length === 0 || !auth.currentUser) return;
 
 		try {
-			console.log('Adding members:', selectedNewMembers, 'to group:', selectedChat.id);
+			// console.log('Adding members:', selectedNewMembers, 'to group:', selectedChat.id);
 			
 			let successCount = 0;
 			let errors = [];
@@ -480,7 +480,7 @@ const Chat = () => {
 					);
 
 					const data = await response.json();
-					console.log(`Add member ${userId} response:`, data);
+					// console.log(`Add member ${userId} response:`, data);
 
 					if (response.ok && data.status) {
 						successCount++;
@@ -547,11 +547,11 @@ const Chat = () => {
 			return;
 		}
 
-		console.log(
-			'Setting up socket listener with selectedChat:',
-			selectedChat?.first_name || 'none'
-		);
-		console.log('Socket connected:', socket.connected);
+		// console.log(
+		// 	'Setting up socket listener with selectedChat:',
+		// 	selectedChat?.first_name || 'none'
+		// );
+		// console.log('Socket connected:', socket.connected);
 
 		// Test socket connection
 		socket.on('connect', () => {
@@ -563,14 +563,14 @@ const Chat = () => {
 		});
 
 		const handleReceiveMessage = (newMessage) => {
-			console.log('Received new message:', newMessage);
-			console.log('Message type:', newMessage.message_type);
-			console.log('Has attachment:', !!newMessage.attachment_url);
-			console.log('Attachment URL:', newMessage.attachment_url);
-			console.log(
-				'Current selectedChat:',
-				selectedChat?.firebase_uid || 'none'
-			);
+			// console.log('Received new message:', newMessage);
+			// console.log('Message type:', newMessage.message_type);
+			// console.log('Has attachment:', !!newMessage.attachment_url);
+			// console.log('Attachment URL:', newMessage.attachment_url);
+			// console.log(
+			// 	'Current selectedChat:',
+			// 	selectedChat?.firebase_uid || 'none'
+			// );
 
 			// Ensure we're in the room for this conversation
 			const otherUserId =
@@ -650,12 +650,12 @@ const Chat = () => {
 			);
 
 			if (isMessageForCurrentChat) {
-				console.log(
-					'✅ Message belongs to current chat, updating messages array'
-				);
-				console.log('Selected chat UID:', selectedChat.firebase_uid);
-				console.log('Message sender:', newMessage.sender_id);
-				console.log('Message receiver:', newMessage.receiver_id);
+				// console.log(
+				// 	'✅ Message belongs to current chat, updating messages array'
+				// );
+				// console.log('Selected chat UID:', selectedChat.firebase_uid);
+				// console.log('Message sender:', newMessage.sender_id);
+				// console.log('Message receiver:', newMessage.receiver_id);
 
 				const formattedMessage = {
 					id: newMessage.id,
@@ -674,12 +674,12 @@ const Chat = () => {
 					attachment_size: newMessage.attachment_size,
 				};
 
-				console.log('Formatted message:', formattedMessage);
-				console.log('Message has attachment_url:', !!formattedMessage.attachment_url);
+				// console.log('Formatted message:', formattedMessage);
+				// console.log('Message has attachment_url:', !!formattedMessage.attachment_url);
 
 				// Check for duplicate messages (prevent double-adding real messages)
 				setMessages((prevMessages) => {
-					console.log('Previous messages count:', prevMessages.length);
+					// console.log('Previous messages count:', prevMessages.length);
 
 					// Check if this exact message already exists (by ID)
 					const existingMessage = prevMessages.find(
@@ -694,13 +694,13 @@ const Chat = () => {
 						return prevMessages;
 					}
 
-					console.log(
-						'✅ Adding new message to current chat:',
-						formattedMessage
-					);
+					// console.log(
+					// 	'✅ Adding new message to current chat:',
+					// 	formattedMessage
+					// );
 					const newMessages = [...prevMessages, formattedMessage];
-					console.log('New messages count:', newMessages.length);
-					console.log('Message added with attachment_url:', formattedMessage.attachment_url);
+					// console.log('New messages count:', newMessages.length);
+					// console.log('Message added with attachment_url:', formattedMessage.attachment_url);
 					
 					// Force re-render by updating messages state
 					setTimeout(() => {
@@ -713,12 +713,12 @@ const Chat = () => {
 				// Scroll to bottom after adding new message
 				setTimeout(scrollToBottom, 100);
 			} else {
-				console.log(
-					'❌ Message does not belong to current chat or no chat selected'
-				);
-				console.log('Selected chat UID:', selectedChat?.firebase_uid || 'none');
-				console.log('Message sender:', newMessage.sender_id);
-				console.log('Message receiver:', newMessage.receiver_id);
+				// console.log(
+				// 	'❌ Message does not belong to current chat or no chat selected'
+				// );
+				// console.log('Selected chat UID:', selectedChat?.firebase_uid || 'none');
+				// console.log('Message sender:', newMessage.sender_id);
+				// console.log('Message receiver:', newMessage.receiver_id);
 
 				// Increment unread count for chats not currently selected
 				if (newMessage.sender_id !== auth.currentUser.uid) {
@@ -748,17 +748,17 @@ const Chat = () => {
 
 		// Handle group messages
 		socket.on('receive_group_message', (newMessage) => {
-			console.log('🔵 Received group message:', newMessage);
-			console.log('🔵 Message has attachment_url:', !!newMessage.attachment_url);
-			console.log('🔵 Message type:', newMessage.message_type);
-			console.log('🔵 Current selectedChat:', selectedChat);
-			console.log('🔵 selectedChat.id:', selectedChat?.id, 'newMessage.group_id:', newMessage.group_id);
+			// console.log('🔵 Received group message:', newMessage);
+			// console.log('🔵 Message has attachment_url:', !!newMessage.attachment_url);
+			// console.log('🔵 Message type:', newMessage.message_type);
+			// console.log('🔵 Current selectedChat:', selectedChat);
+			// console.log('🔵 selectedChat.id:', selectedChat?.id, 'newMessage.group_id:', newMessage.group_id);
 			
 			// Check if this message is for the current group chat
 			const isMessageForCurrentChat = selectedChat?.isGroup && 
 				selectedChat.id === newMessage.group_id;
 
-			console.log('🔵 isMessageForCurrentChat:', isMessageForCurrentChat);
+			// console.log('🔵 isMessageForCurrentChat:', isMessageForCurrentChat);
 
 			if (isMessageForCurrentChat) {
 				setMessages(prevMessages => {
@@ -790,8 +790,8 @@ const Chat = () => {
 						chat_type: 'group'
 					};
 					
-					console.log('🔵 Adding new group message to state:', transformedMessage);
-					console.log('🔵 Transformed message has attachment_url:', !!transformedMessage.attachment_url);
+					// console.log('🔵 Adding new group message to state:', transformedMessage);
+					// console.log('🔵 Transformed message has attachment_url:', !!transformedMessage.attachment_url);
 					return [...prevMessages, transformedMessage];
 				});
 				
@@ -924,10 +924,10 @@ const Chat = () => {
 				selectedChat.firebase_uid
 			);
 			setUnreadMessages((prev) => {
-				console.log(
-					'🧹 Previous unread count:',
-					prev[selectedChat.firebase_uid] || 0
-				);
+				// console.log(
+				// 	'🧹 Previous unread count:',
+				// 	prev[selectedChat.firebase_uid] || 0
+				// );
 				return {
 					...prev,
 					[selectedChat.firebase_uid]: 0,

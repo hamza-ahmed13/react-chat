@@ -10,11 +10,9 @@ export function SocketProvider({ children }) {
 
 	useEffect(() => {
 		if (!auth.currentUser) {
-			console.log('No user logged in, not connecting socket');
 			return;
 		}
 
-		console.log('Initializing socket connection for user:', auth.currentUser.uid);
 
 		// Initialize socket connection
 		const newSocket = io('http://localhost:8000', {
@@ -26,7 +24,6 @@ export function SocketProvider({ children }) {
 
 		// Socket event listeners
 		newSocket.on('connect', () => {
-			console.log('Connected to socket server');
 
 			// Set user ID on the server
 			newSocket.emit('set_user_id', auth.currentUser.uid);
@@ -34,7 +31,6 @@ export function SocketProvider({ children }) {
 			// Join a user-specific room for receiving messages
 			const userRoom = `user-${auth.currentUser.uid}`;
 			newSocket.emit('join_room', userRoom);
-			console.log(`Joined user-specific room: ${userRoom}`);
 		});
 
 		newSocket.on('connect_error', (error) => {
