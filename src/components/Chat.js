@@ -905,24 +905,24 @@ const Chat = () => {
 
 	useEffect(() => {
 		if (selectedChat) {
-			console.log(
-				'Selected chat changed to:',
-				selectedChat.first_name,
-				selectedChat.firebase_uid
-			);
+			// console.log(
+			// 	'Selected chat changed to:',
+			// 	selectedChat.first_name,
+			// 	selectedChat.firebase_uid
+			// );
 			fetchMessages();
 			const roomName = generateRoomName(
 				auth.currentUser.uid,
 				selectedChat.firebase_uid
 			);
-			console.log('Joining room for selected chat:', roomName);
+			// console.log('Joining room for selected chat:', roomName);
 			joinRoom(roomName);
 
 			// Clear unread messages for selected chat
-			console.log(
-				'🧹 Clearing unread messages for selected chat:',
-				selectedChat.firebase_uid
-			);
+			// console.log(
+			// 	'🧹 Clearing unread messages for selected chat:',
+			// 	selectedChat.firebase_uid
+			// );
 			setUnreadMessages((prev) => {
 				// console.log(
 				// 	'🧹 Previous unread count:',
@@ -1254,13 +1254,13 @@ const Chat = () => {
 		const hasText = msg.text && msg.text.trim();
 		const isOwnMessage = msg.senderId === auth.currentUser?.uid;
 		
-		console.log('Rendering message:', {
-			id: msg.id,
-			hasAttachment,
-			attachment_url: msg.attachment_url,
-			message_type: msg.message_type,
-			hasText
-		});
+		// console.log('Rendering message:', {
+		// 	id: msg.id,
+		// 	hasAttachment,
+		// 	attachment_url: msg.attachment_url,
+		// 	message_type: msg.message_type,
+		// 	hasText
+		// });
 
 	return (
 			<>
